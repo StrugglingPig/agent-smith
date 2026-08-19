@@ -1,3 +1,4 @@
+using AgentSmith.Tests.TestSupport;
 using AgentSmith.Contracts.Dialogue;
 using AgentSmith.Contracts.Events;
 using AgentSmith.Infrastructure.Persistence;
@@ -23,10 +24,7 @@ public sealed class DurableDialogueProjectionTests : IDisposable
 
     public DurableDialogueProjectionTests()
     {
-        _connection = new SqliteConnection("Data Source=:memory:");
-        _connection.Open();
-        using var ctx = new AgentSmithDbContext(Options());
-        ctx.Database.Migrate();
+        _connection = MigratedStoreTemplate.OpenCopy();
     }
 
     public void Dispose() => _connection.Dispose();
@@ -131,5 +129,5 @@ public sealed class DurableDialogueProjectionTests : IDisposable
         new DbContextOptionsBuilder<AgentSmithDbContext>().UseSqlite(_connection).Options;
 
     private async Task ApplyAsync(RunEvent ev) =>
-        await new RunEventApplier().ApplyAsync(new AgentSmithDbContext(Options()), ev, CancellationToken.None);
+        await new RunEventApplier(new(), new(), new(), new(), new(), new(), new()).ApplyAsync(new AgentSmithDbContext(Options()), ev, CancellationToken.None);
 }

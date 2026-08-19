@@ -1,5 +1,4 @@
 using AgentSmith.Contracts.Models.Configuration;
-using AgentSmith.Domain.Exceptions;
 using AgentSmith.Infrastructure.Core.Services.Configuration;
 using FluentAssertions;
 
@@ -7,7 +6,10 @@ namespace AgentSmith.Tests.Configuration;
 
 public class ProjectConfigNormalizerTests
 {
-    private readonly ProjectConfigNormalizer _sut = new();
+    private readonly StartupFindings _findings = new();
+    private readonly ProjectConfigNormalizer _sut;
+
+    public ProjectConfigNormalizerTests() => _sut = new ProjectConfigNormalizer(findings: _findings);
 
     [Fact]
     public void Normalize_LegacyPipelineString_TranslatesToPipelinesAndDefaultPipeline()
@@ -24,7 +26,7 @@ public class ProjectConfigNormalizerTests
     [Fact]
     public void Normalize_LegacySkillsPathDefaultValue_NotCarriedToPipelineDefinition()
     {
-        var project = new RawProjectEntry { Pipeline = "fix-bug", SkillsPath = "skills/coding" };
+        var project = new RawProjectEntry { Pipeline = "fix-bug", SkillsPath = "skills" };
 
         _sut.Normalize("p", project);
 
@@ -34,11 +36,11 @@ public class ProjectConfigNormalizerTests
     [Fact]
     public void Normalize_LegacySkillsPathCustomValue_CarriedToPipelineDefinition()
     {
-        var project = new RawProjectEntry { Pipeline = "security-scan", SkillsPath = "skills/security" };
+        var project = new RawProjectEntry { Pipeline = "security-scan", SkillsPath = "custom/skills" };
 
         _sut.Normalize("p", project);
 
-        project.Pipelines[0].SkillsPath.Should().Be("skills/security");
+        project.Pipelines[0].SkillsPath.Should().Be("custom/skills");
     }
 
     [Fact]
@@ -74,7 +76,7 @@ public class ProjectConfigNormalizerTests
     }
 
     [Fact]
-    public void Normalize_DefaultPipelineNotInPipelinesList_ThrowsConfigurationException()
+    public void Normalize_DefaultPipelineNotInPipelinesList_ReturnsBlockingFindingAndDoesNotThrow()
     {
         var project = new RawProjectEntry
         {
@@ -84,8 +86,10 @@ public class ProjectConfigNormalizerTests
 
         Action act = () => _sut.Normalize("proj", project);
 
-        act.Should().Throw<ConfigurationException>()
-            .WithMessage("*default_pipeline*missing*");
+        act.Should().NotThrow();
+        _findings.All.Should().ContainSingle(f =>
+            f.IsBlocking && f.Project == "proj" && f.Field == "default_pipeline");
+        _findings.All[0].Reason.Should().Contain("missing");
     }
 
     [Fact]
@@ -96,9 +100,88 @@ public class ProjectConfigNormalizerTests
             Pipelines = [new RawPipelineEntry { Name = "fix-bug" }],
             GithubTrigger = new WebhookTriggerConfig
             {
+                // p0391: fix-bug can park, so the trigger must name a park status — that is a
+                // different rule, asserted below; this test is about label routing only.
+                NeedsClarificationStatus = "Question",
                 PipelineFromLabel = new Dictionary<string, string> { ["security-review"] = "security-scan" }
             }
         };
+
+        Action act = () => _sut.Normalize("proj", project);
+
+        act.Should().NotThrow();
+    }
+
+    // ---- p0391: a preset that can park must have somewhere to park ----
+
+    [Fact]
+    public void Normalizer_ParkingPresetWithoutStatus_ReturnsBlockingFindingAndDoesNotThrow()
+    {
+        // The silent degrade this replaces: the gate posted its question, logged
+        // "(not parked — needs_clarification_status unset)" and ended the run Ok, leaving the
+        // ticket in a trigger status — so discovery re-claimed it and the same run repeated.
+        var project = new RawProjectEntry
+        {
+            Pipelines = [new RawPipelineEntry { Name = "fix-bug" }],
+            GithubTrigger = new WebhookTriggerConfig { TriggerStatuses = ["open"] },
+        };
+
+        Action act = () => _sut.Normalize("proj", project);
+
+        act.Should().NotThrow();
+        var finding = _findings.All.Should().ContainSingle().Which;
+        finding.IsBlocking.Should().BeTrue();
+        finding.Project.Should().Be("proj");
+        finding.Trigger.Should().Be("github_trigger");
+        finding.Field.Should().Be("needs_clarification_status");
+        finding.Reason.Should().Contain("fix-bug");
+    }
+
+    [Fact]
+    public void Normalize_ParkingPipelineReachedOnlyByLabelRoute_ReturnsBlockingFinding()
+    {
+        // The pipeline a ticket actually runs can come from the label map, not from
+        // pipelines:/default_pipeline — the rule reads every route the trigger can take.
+        var project = new RawProjectEntry
+        {
+            Pipelines = [new RawPipelineEntry { Name = "security-scan" }],
+            DefaultPipeline = "security-scan",
+            GithubTrigger = new WebhookTriggerConfig
+            {
+                TriggerStatuses = ["open"],
+                PipelineFromLabel = new Dictionary<string, string> { ["bug"] = "add-feature" },
+            },
+        };
+
+        Action act = () => _sut.Normalize("proj", project);
+
+        act.Should().NotThrow();
+        _findings.All.Should().ContainSingle(f => f.IsBlocking && f.Reason.Contains("add-feature"));
+    }
+
+    [Fact]
+    public void Normalize_NonParkingPipelineWithoutClarificationStatus_ProducesNoFinding()
+    {
+        // The rule fires only where a park can happen. A scan-only project has no
+        // clarification step in its preset and is untouched.
+        var project = new RawProjectEntry
+        {
+            Pipelines = [new RawPipelineEntry { Name = "security-scan" }],
+            DefaultPipeline = "security-scan",
+            GithubTrigger = new WebhookTriggerConfig { TriggerStatuses = ["open"] },
+        };
+
+        Action act = () => _sut.Normalize("proj", project);
+
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    public void Normalize_ParkingPipelineWithoutAnyTrigger_ProducesNoFinding()
+    {
+        // No trigger block = no tracker-driven runs = nothing to park. CLI-only projects
+        // and the many trackerless test/demo configs stay valid.
+        var project = new RawProjectEntry { Pipelines = [new RawPipelineEntry { Name = "fix-bug" }] };
 
         Action act = () => _sut.Normalize("proj", project);
 
@@ -126,7 +209,7 @@ public class ProjectConfigNormalizerTests
     // p0261: done_status/failed_status must be OUTSIDE trigger_statuses, else a
     // terminalized ticket lands back in a trigger status and is re-claimed forever.
     [Fact]
-    public void Normalize_DoneStatusInTriggerStatuses_Throws()
+    public void Normalizer_TerminalStatusInsideTriggerStatuses_StillReturnsAFinding()
     {
         var project = new RawProjectEntry
         {
@@ -139,11 +222,16 @@ public class ProjectConfigNormalizerTests
 
         var act = () => _sut.Normalize("p", project);
 
-        act.Should().Throw<ConfigurationException>().WithMessage("*done_status*trigger_status*");
+        act.Should().NotThrow();
+        var finding = _findings.All.Should().ContainSingle().Which;
+        finding.IsBlocking.Should().BeTrue();
+        finding.Field.Should().Be("done_status");
+        finding.Trigger.Should().Be("azuredevops_trigger");
+        finding.Reason.Should().Contain("trigger_status");
     }
 
     [Fact]
-    public void Normalize_FailedStatusInTriggerStatuses_Throws()
+    public void Normalize_FailedStatusInTriggerStatuses_ReturnsBlockingFinding()
     {
         var project = new RawProjectEntry
         {
@@ -157,11 +245,12 @@ public class ProjectConfigNormalizerTests
 
         var act = () => _sut.Normalize("p", project);
 
-        act.Should().Throw<ConfigurationException>().WithMessage("*failed_status*trigger_status*");
+        act.Should().NotThrow();
+        _findings.All.Should().ContainSingle(f => f.IsBlocking && f.Field == "failed_status");
     }
 
     [Fact]
-    public void Normalize_TerminalStatusesOutsideTriggerStatuses_DoesNotThrow()
+    public void Config_FullyValid_ProducesNoFindings()
     {
         var project = new RawProjectEntry
         {
@@ -176,5 +265,41 @@ public class ProjectConfigNormalizerTests
         var act = () => _sut.Normalize("p", project);
 
         act.Should().NotThrow();
+        _findings.All.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Normalize_EmptyTriggerStatuses_ReturnsAdvisoryFindingOnly()
+    {
+        var project = new RawProjectEntry
+        {
+            Pipelines = [new RawPipelineEntry { Name = "security-scan" }],
+            AzuredevopsTrigger = new WebhookTriggerConfig { TriggerStatuses = [] },
+        };
+
+        _sut.Normalize("p", project);
+
+        var finding = _findings.All.Should().ContainSingle().Which;
+        finding.Severity.Should().Be(StartupFindingSeverity.Advisory);
+        finding.Field.Should().Be("trigger_statuses");
+    }
+
+    [Fact]
+    public void Normalize_OneBrokenTriggerAmongSeveral_OnlyThatTriggerIsNamed()
+    {
+        var project = new RawProjectEntry
+        {
+            Pipelines = [new RawPipelineEntry { Name = "fix-bug" }],
+            GithubTrigger = new WebhookTriggerConfig { TriggerStatuses = ["open"] },
+            JiraTrigger = new JiraTriggerConfig
+            {
+                TriggerStatuses = ["To Do"],
+                NeedsClarificationStatus = "Question",
+            },
+        };
+
+        _sut.Normalize("proj", project);
+
+        _findings.All.Should().ContainSingle().Which.Trigger.Should().Be("github_trigger");
     }
 }

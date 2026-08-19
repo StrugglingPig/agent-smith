@@ -37,6 +37,18 @@ public interface ISourceProvider : ITypedProvider
         bool isDraft = false);
 
     /// <summary>
+    /// p0390: the URL of the OPEN pull request whose source branch is
+    /// <paramref name="repository"/>'s current branch, or null when there is none.
+    /// CommitAndPR is find-or-create because a run now opens its draft PR early —
+    /// at the work-spec commit, so a reviewer has something to edit while the run
+    /// is still working — and a second unconditional create on the same branch
+    /// would throw into the handler's catch and report the whole PR step failed.
+    /// Never throws: a provider that cannot search returns null and the caller
+    /// falls back to creating, which is the pre-p0390 behaviour.
+    /// </summary>
+    Task<string?> FindOpenPullRequestAsync(Repository repository, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Reads a file from the repository's default branch without a full clone.
     /// Returns null when the file does not exist (404 / file-not-found across
     /// the four implementations). Auth + server errors propagate so the caller
@@ -69,4 +81,20 @@ public interface ISourceProvider : ITypedProvider
     /// </summary>
     Task<bool> UpdatePullRequestBodyAsync(
         string prUrl, string newBody, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// p0393a: takes an already-opened pull request out of draft.
+    /// <para>
+    /// A run opens its PR as a draft at the spec commit, before any phase has been
+    /// verified, and a sequence that stops mid-way must STAY a draft: a half-migrated
+    /// repository behind a mergeable PR is the failure the stop exists to prevent, in a
+    /// form that looks finished. Promotion is therefore a deliberate act at the end of a
+    /// complete, green run — without this method "still a draft" would carry no
+    /// information, because nothing would ever leave draft.
+    /// </para>
+    /// Returns true when the pull request is (now) ready for review; false on any
+    /// non-success, and for providers without a draft concept, where nothing has to
+    /// happen for it to be mergeable.
+    /// </summary>
+    Task<bool> MarkPullRequestReadyAsync(string prUrl, CancellationToken cancellationToken);
 }

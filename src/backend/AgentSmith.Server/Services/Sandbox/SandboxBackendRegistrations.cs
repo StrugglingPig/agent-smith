@@ -58,24 +58,34 @@ internal static class SandboxBackendRegistrations
         services.AddSingleton(new DockerSandboxOptions
         {
             RedisUrl = Environment.GetEnvironmentVariable("REDIS_URL") ?? "redis:6379",
-            DockerSocketUri = Environment.GetEnvironmentVariable("DOCKER_HOST") ?? "unix:///var/run/docker.sock",
+            DockerSocketUri = Environment.GetEnvironmentVariable("DOCKER_HOST") ?? DockerSocketUriResolver.DefaultSocket,
             Network = Environment.GetEnvironmentVariable("DOCKER_NETWORK") ?? "",
             MaxConcurrentSandboxes =
                 int.TryParse(Environment.GetEnvironmentVariable("SANDBOX_MAX_CONCURRENT"), out var cap)
                     ? cap
-                    : new DockerSandboxOptions().MaxConcurrentSandboxes
+                    : new DockerSandboxOptions().MaxConcurrentSandboxes,
+            // p0407: warm package caches are what every run wants; the switch exists for
+            // the operator who wants a provably cold restore or is short on disk.
+            PackageCacheEnabled =
+                !bool.TryParse(Environment.GetEnvironmentVariable("SANDBOX_PACKAGE_CACHE"), out var cache) || cache
         });
+        services.AddSingleton<DockerSocketUriResolver>();
         services.AddSingleton<IDockerClient>(sp =>
         {
             var opts = sp.GetRequiredService<DockerSandboxOptions>();
-            return new DockerClientConfiguration(new Uri(opts.DockerSocketUri)).CreateClient();
+            var uri = sp.GetRequiredService<DockerSocketUriResolver>().Resolve(opts.DockerSocketUri);
+            return new DockerClientConfiguration(uri).CreateClient();
         });
         services.AddSingleton<DockerContainerSpecBuilder>();
+        services.AddSingleton<DockerPackageCaches>();
+        services.AddSingleton<DockerImagePresence>();
         services.AddSingleton<ISandboxFactory>(sp => new DockerSandboxFactory(
             sp.GetRequiredService<IDockerClient>(),
             sp.GetRequiredService<IConnectionMultiplexer>(),
             sp.GetRequiredService<DockerContainerSpecBuilder>(),
             sp.GetRequiredService<DockerSandboxOptions>(),
+            sp.GetRequiredService<DockerPackageCaches>(),
+            sp.GetRequiredService<DockerImagePresence>(),
             sp.GetRequiredService<IOptions<SandboxGlobalConfig>>(),
             sp.GetRequiredService<ILoggerFactory>()));
         // p0269a: Docker capacity is a configured concurrent-sandbox cap (no
@@ -93,7 +103,9 @@ internal static class SandboxBackendRegistrations
             sp.GetRequiredService<IRunCancellationRegistry>(),
             sp.GetRequiredService<IEventPublisher>(),
             sp.GetRequiredService<ILoggerFactory>()));
-        // p0201: orphan reaper as singleton hosted service.
+        // p0201: orphan reaper as singleton hosted service. p0391b: it takes IDockerClient
+        // by constructor, so the host builds it before it starts anything — which is why a
+        // malformed DOCKER_HOST used to kill the whole server rather than the Docker backend.
         services.AddHostedService(sp => new SandboxOrphanReaper(
             sp.GetRequiredService<IDockerClient>(),
             sp.GetRequiredService<IConnectionMultiplexer>(),

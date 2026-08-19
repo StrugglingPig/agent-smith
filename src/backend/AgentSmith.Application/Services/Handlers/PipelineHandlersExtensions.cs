@@ -3,16 +3,20 @@ using AgentSmith.Application.Services.Activation;
 using AgentSmith.Application.Services.Builders;
 using AgentSmith.Application.Services.PhaseExecution;
 using AgentSmith.Application.Services.Sandbox;
+using AgentSmith.Application.Services.Scans;
 using AgentSmith.Application.Services.SpecDialog;
 using AgentSmith.Application.Services.Tickets;
 using AgentSmith.Application.Services.Triage;
+using AgentSmith.Application.Services.Specs;
 using AgentSmith.Application.Services.Validation;
 using AgentSmith.Contracts.Sandbox;
 using AgentSmith.Contracts.Activation;
 using AgentSmith.Contracts.Commands;
 using AgentSmith.Application.Services;
 using AgentSmith.Contracts.Services;
+using AgentSmith.Contracts.Specs;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace AgentSmith.Application.Services.Handlers;
 
@@ -35,6 +39,9 @@ public static class PipelineHandlersExtensions
         // p0331: ticket→repo scope classification + pre-checkout context inventory.
         services.AddTransient<ICommandHandler<ScopeReposContext>, ScopeReposHandler>();
         services.AddTransient<Scope.RepoScopeClassifier>();
+        services.AddTransient<Scope.RemoteContextInventoryBuilder>();
+        // p0413: the classifier's size + shape estimates become run state here.
+        services.AddTransient<Scope.ScopeEstimateRecorder>();
         AddConceptPublishingHandler<CheckoutSourceHandler, CheckoutSourceContext>(services);
         // p0331: shared clone-into-sandbox path (CheckoutSource + ensure_repo_sandbox)
         // and the per-run factory for the master's escalation tool host.
@@ -79,11 +86,37 @@ public static class PipelineHandlersExtensions
         services.AddTransient<Expectations.IExpectationTrackerCommenter, Expectations.ExpectationTrackerCommenter>();
         services.AddTransient<Expectations.ExpectationOutcomeRecorder>();
         services.AddTransient<ExpectationQuestionBuilder>();
+        // p0393a: turn the ticket into an ordered SET of phase specs after AnalyzeCode —
+        // deriver (the one LLM call, judgement only), deterministic segmenter/extractor,
+        // reader + writer over the ticket branch, publisher (commit, pointer, draft PR),
+        // and the sequence that splices one block per phase.
+        services.AddTransient<ICommandHandler<DeriveSpecContext>, DeriveSpecHandler>();
+        services.AddTransient<ICommandHandler<PhaseSequenceContext>, PhaseSequenceHandler>();
+        services.AddTransient<ICommandHandler<SelectPhaseContext>, SelectPhaseHandler>();
+        services.AddTransient<ICommandHandler<SpecHandbackContext>, SpecHandbackHandler>();
+        services.AddSpecDerivation();
+        services.AddTransient<DiscoveryOutputParser>();
+        // p0403: statics that needed a collaborator are services now.
+        services.AddTransient<RunDirectoryReader>();
+        services.AddTransient<SnapshotYamlParser>();
+        services.AddTransient<ObservationRecoveryHelper>();
+        services.AddTransient<Lifecycle.TicketLifecycle>();
+        services.AddTransient<ProjectMapCacheKey>();
+        services.AddSingleton<SandboxTargets>();
+        services.AddSingleton<Tools.AgenticToolSurface>();
+        services.AddSingleton<Polling.PipelineResolver>();
+        // p0401: shared scanner-observation service (severity mapping + warn-once).
+        services.AddSingleton<ScannerObservationFactory>();
         services.AddTransient<ICommandHandler<ApprovalContext>, ApprovalHandler>();
-        services.AddTransient<ICommandHandler<AgenticExecuteContext>, AgenticExecuteHandler>();
         services.AddTransient<ICommandHandler<AgenticMasterContext>, AgenticMasterHandler>();
         services.AddTransient<ITicketDocumentMaterializer, TicketDocumentMaterializer>();
+        services.AddTransient<GitBranchPusher>(); // p0422
         services.AddTransient<SandboxGitOperations>();
+        // p0411: the framework-owned sandbox facts — the committing identity (set at
+        // checkout) and the working tree's changed paths (carried in the state block).
+        services.AddTransient<Sandbox.SandboxGitIdentity>();
+        services.AddTransient<Sandbox.SandboxWorkingTreeReader>();
+        services.AddTransient<RepoWorkPusher>(); // p0437: puts one repo's work on the branch
         services.AddTransient<RunWorkCheckpointer>(); // p0360: mid-run work durability
         services.AddSingleton<ISecretPatternScanner, SecretPatternScanner>();
         services.AddTransient<ICommandHandler<CommitAndPRContext>, CommitAndPRHandler>();
@@ -92,13 +125,11 @@ public static class PipelineHandlersExtensions
         services.AddTransient<ICommandHandler<InitCommitContext>, InitCommitHandler>();
         services.AddTransient<ICommandHandler<PrCrossLinkContext>, PrCrossLinkHandler>();
         services.AddTransient<ICommandHandler<SwitchSkillContext>, SwitchSkillHandler>();
-        services.AddTransient<ICommandHandler<PhaseAdvanceContext>, PhaseAdvanceHandler>();
         services.AddTransient<ICommandHandler<PersistWorkBranchContext>, PersistWorkBranchHandler>();
         services.AddTransient<ICommandHandler<GenerateTestsContext>, GenerateTestsHandler>();
         services.AddTransient<ICommandHandler<GenerateDocsContext>, GenerateDocsHandler>();
         // p0355: scopes the test/doc passes to the repos that actually changed.
         services.AddTransient<RepoDiffPartitioner>();
-        services.AddTransient<ICommandHandler<CompileDiscussionContext>, CompileDiscussionHandler>();
         services.AddTransient<ICommandHandler<AcquireSourceContext>, AcquireSourceHandler>();
         services.AddTransient<ICommandHandler<BootstrapDocumentContext>, BootstrapDocumentHandler>();
         services.AddTransient<ICommandHandler<DeliverOutputContext>, DeliverOutputHandler>();
@@ -106,31 +137,16 @@ public static class PipelineHandlersExtensions
         services.AddTransient<ICommandHandler<AskContext>, AskCommandHandler>();
         services.AddTransient<ICommandHandler<CompileKnowledgeContext>, CompileKnowledgeHandler>();
         services.AddTransient<ICommandHandler<QueryKnowledgeContext>, QueryKnowledgeHandler>();
-        services.AddTransient<ICommandHandler<LoadRunsContext>, LoadRunsHandler>();
-        services.AddTransient<ICommandHandler<WriteTicketsContext>, WriteTicketsHandler>();
         services.AddSingleton<KnowledgePromptBuilder>();
-        services.AddSingleton<StructuredOutputInstructionBuilder>();
-        services.AddTransient<PromptPrefixBuilder>();
-        services.AddTransient<ISkillPromptBuilder, SkillPromptBuilder>();
         services.AddTransient<IGateOutputHandler, GateOutputHandler>();
         services.AddTransient<IGateRetryCoordinator, GateRetryCoordinator>();
         services.AddTransient<IUpstreamContextBuilder, UpstreamContextBuilder>();
-        services.AddTransient<ICommandHandler<TriageContext>, TriageHandler>();
-        services.AddTransient<DeterministicTriageSelector>();
-        services.AddTransient<TriageLabelOverrideApplier>();
-        services.AddTransient<ProjectMapExcerptBuilder>();
-        services.AddTransient<PhaseCommandExpander>();
-        services.AddSingleton<SinglePhaseCollapser>();
-        services.AddTransient<ITriageOutputProducer, TriageOutputProducer>();
-        services.AddTransient<StructuredTriageStrategy>();
-        services.AddTransient<ITriageStrategySelector, TriageStrategySelector>();
         services.AddTransient<ICommandHandler<LoadSkillsContext>, LoadSkillsHandler>();
         services.AddSingleton<ActivationExpressionTokenizer>();
         services.AddSingleton<ActivationExpressionParser>();
         services.AddSingleton<ActivationEvaluator>();
         services.AddSingleton<ActivationSkillFilter>();
         services.AddSingleton<ActivationSpecificityScorer>();
-        services.AddSingleton<PhaseSpecificityTrimmer>();
         AddConceptPublishingHandler<PipelineNameInitializerHandler, PipelineNameInitializerContext>(services);
         AddConceptPublishingHandler<BootstrapCheckHandler, BootstrapCheckContext>(services);
         services.AddTransient<ICommandHandler<BootstrapGateContext>, BootstrapGateHandler>();
@@ -163,28 +179,23 @@ public static class PipelineHandlersExtensions
         // renderer), spec-first master prompt, mid-run clarification park and the
         // phases/done/ dogfood record.
         services.AddTransient<IPhaseSpecFromTicket, PhaseSpecFromTicket>();
-        services.AddTransient<PhaseSpecPlanFactory>();
         services.AddTransient<IPhaseExecutionPromptFactory, PhaseExecutionPromptFactory>();
         services.AddTransient<ICommandHandler<PhaseSpecGateContext>, PhaseSpecGateHandler>();
+        services.AddTransient<VerifyCommandRunner>(); // p0419
+        // p0420: delivery is accounted for against the branch, not inferred from the run.
+        services.AddTransient<DeliveryDiff>();
+        services.AddTransient<Specs.SpecAccountCall>();
+        services.AddTransient<Specs.ISpecAccountant, Specs.SpecAccountant>();
+        services.AddTransient<Specs.PhaseAccounting>();
+        services.AddTransient<ICommandHandler<VerifyPhaseContext>, VerifyPhaseHandler>(); // p0393
+        services.AddTransient<Triage.MasterQuestionCheckpoint>();
         services.AddTransient<ICommandHandler<MasterOpenQuestionsContext>, MasterOpenQuestionsHandler>();
+        services.AddTransient<ICommandHandler<CommitPhaseWorkContext>,
+            PhaseExecution.CommitPhaseWorkHandler>(); // p0437
         services.AddTransient<ICommandHandler<WritePhaseRecordContext>, WritePhaseRecordHandler>();
         services.AddTransient<ISourceScopeSandboxFactory, SourceScopeSandboxFactory>();
-        services.AddTransient<ICommandHandler<CollectMasterFindingsContext>, CollectMasterFindingsHandler>();
-        services.AddTransient<ICommandHandler<DeliverFindingsContext>, DeliverFindingsHandler>();
-        services.AddTransient<ICommandHandler<StaticPatternScanContext>, StaticPatternScanHandler>();
-        services.AddTransient<ICommandHandler<GitHistoryScanContext>, GitHistoryScanHandler>();
-        services.AddTransient<ICommandHandler<DependencyAuditContext>, DependencyAuditHandler>();
-        services.AddTransient<ICommandHandler<CompressSecurityFindingsContext>, CompressSecurityFindingsHandler>();
-        services.AddTransient<ICommandHandler<MergeMasterFindingsContext>, MergeMasterFindingsHandler>();
-        services.AddTransient<NucleiTopSelector>();
-        services.AddTransient<ZapTopSelector>();
-        services.AddTransient<SpectralTopSelector>();
-        services.AddTransient<ICommandHandler<CompressApiScanFindingsContext>, CompressApiScanFindingsHandler>();
-        services.AddTransient<ICommandHandler<SecurityTrendContext>, SecurityTrendHandler>();
-        services.AddTransient<ICommandHandler<SecuritySnapshotWriteContext>, SecuritySnapshotWriter>();
-        services.AddTransient<ICommandHandler<SpawnFixContext>, SpawnFixHandler>();
         services.AddSingleton<HttpProbeRunner>();
-        return services;
+        return services.AddScanPipelines(); // p0429
     }
 
     // Triple-registration: concrete handler + ICommandHandler<TContext> + IConceptWriter

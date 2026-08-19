@@ -28,6 +28,11 @@ internal sealed class LocalGitSourceProvider(DockerHarnessSession session) : ISo
         CancellationToken cancellationToken, TicketId? linkedTicketId = null, bool isDraft = false) =>
         Task.FromResult($"https://fake.local/pulls/{linkedTicketId?.Value ?? "1"}");
 
+    // p0390: the fake local remote has no PR surface, so find-or-create always creates.
+    public Task<string?> FindOpenPullRequestAsync(
+        Repository repository, CancellationToken cancellationToken) =>
+        Task.FromResult<string?>(null);
+
     public Task<string?> TryReadFileAsync(string path, CancellationToken cancellationToken)
     {
         var full = Path.Combine(session.WorkingCopyPath, path);
@@ -48,4 +53,15 @@ internal sealed class LocalGitSourceProvider(DockerHarnessSession session) : ISo
 
     public Task<bool> UpdatePullRequestBodyAsync(string prUrl, string newBody, CancellationToken cancellationToken) =>
         Task.FromResult(true);
+
+    // p0393a: the harness records the promotion so a test can assert that a stopped
+    // sequence never leaves draft, and a complete one does.
+    public Task<bool> MarkPullRequestReadyAsync(string prUrl, CancellationToken cancellationToken)
+    {
+        MarkedReady.Add(prUrl);
+        return Task.FromResult(true);
+    }
+
+    /// <summary>Pull requests this run took out of draft.</summary>
+    public static List<string> MarkedReady { get; } = [];
 }

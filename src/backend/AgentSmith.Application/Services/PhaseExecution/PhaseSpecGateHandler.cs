@@ -1,46 +1,56 @@
 using AgentSmith.Application.Models;
 using AgentSmith.Contracts.Commands;
-using AgentSmith.Contracts.Models;
+using AgentSmith.Contracts.Specs;
 using AgentSmith.Domain.Models;
 using Microsoft.Extensions.Logging;
 
 namespace AgentSmith.Application.Services.PhaseExecution;
 
 /// <summary>
-/// p0315d: the phase-execution entry gate. Extracts the fenced yaml spec out
-/// of the phase ticket (inverse of the p0315c renderer, AzDO HTML variant
-/// included), publishes the validated <see cref="PhaseDraft"/> as
-/// <see cref="ContextKeys.PhaseSpec"/> and its steps as the approved
-/// <see cref="ContextKeys.Plan"/> the master executes. A phase-labelled
-/// ticket without a schema-valid spec fails the run loudly HERE — before any
-/// master tokens are spent on a broken artifact.
+/// p0315d, p0393a: the entry gate of the code pipeline. It no longer extracts anything
+/// itself — DeriveSpec resolves the set under a fixed source precedence (branch
+/// artifact, then a spec embedded in the ticket description, then derivation) and this
+/// step is the assertion that a validated set exists before a single master token is
+/// spent, plus the publication of the first phase as the current one.
+/// <para>
+/// A run without a set is a composition failure, not a ticket shape: every ticket now
+/// gets one, and the fail-safe path still produces one phase carrying the whole ticket.
+/// Failing here is what keeps that promise honest.
+/// </para>
 /// </summary>
-public sealed class PhaseSpecGateHandler(
-    IPhaseSpecFromTicket specFromTicket,
-    PhaseSpecPlanFactory planFactory,
-    ILogger<PhaseSpecGateHandler> logger)
+public sealed class PhaseSpecGateHandler(ILogger<PhaseSpecGateHandler> logger)
     : ICommandHandler<PhaseSpecGateContext>
 {
     public Task<CommandResult> ExecuteAsync(
         PhaseSpecGateContext context, CancellationToken cancellationToken)
     {
-        var extraction = specFromTicket.Extract(context.Ticket.Description);
-        if (extraction is PhaseSpecInvalid invalid)
-        {
-            logger.LogWarning(
-                "Phase ticket {Ticket} carries no executable spec: {Error}",
-                context.Ticket.Id.Value, invalid.Error);
+        ArgumentNullException.ThrowIfNull(context);
+        if (!context.Pipeline.TryGet<SpecSet>(ContextKeys.SpecSet, out var set) || set is null)
             return Task.FromResult(CommandResult.Fail(
-                $"Phase ticket {context.Ticket.Id.Value} carries no executable spec: {invalid.Error}"));
-        }
+                $"No phase spec for ticket {context.Ticket.Id.Value}: DeriveSpec produced "
+                + "neither a branch artifact, an embedded spec nor a derived set."));
 
-        var draft = ((PhaseSpecExtracted)extraction).Draft;
-        context.Pipeline.Set(ContextKeys.PhaseSpec, draft);
-        context.Pipeline.Set(ContextKeys.Plan, planFactory.Build(draft));
+        if (set.IsHandedBack)
+            return Task.FromResult(CommandResult.Ok(
+                $"The derivation handed ticket {context.Ticket.Id.Value} back "
+                + $"({set.Handback!.Case}) — nothing to gate"));
+
+        if (set.Phases.Count == 0)
+            return Task.FromResult(CommandResult.Fail(
+                $"Spec set {set.Key} carries no phase — there is nothing to build."));
+
+        // The first phase is current until the sequence selects the next one. Publishing it
+        // here keeps every downstream reader (planner, master, keystone, phase record)
+        // working off one key whether or not a sequence is involved.
+        var first = set.Phases[0];
+        context.Pipeline.Set(ContextKeys.PhaseSpec, first.Draft);
         logger.LogInformation(
-            "Phase spec {PhaseId} extracted from ticket {Ticket} ({Goal})",
-            draft.PhaseId, context.Ticket.Id.Value, draft.Goal);
+            "Spec set {Key} validated: {Count} phase(s), first is {PhaseId} ({Goal})",
+            set.Key, set.Phases.Count, first.PhaseId, first.Draft.Goal);
         return Task.FromResult(CommandResult.Ok(
-            $"Phase spec {draft.PhaseId} validated: {draft.Goal}"));
+            set.Phases.Count == 1
+                ? $"Phase spec {first.PhaseId} validated: {first.Draft.Goal}"
+                : $"{set.Phases.Count} phase specs validated, starting at {first.PhaseId}: "
+                  + first.Draft.Goal));
     }
 }

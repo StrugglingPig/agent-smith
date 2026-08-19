@@ -13,11 +13,10 @@ public sealed class BootstrapGatePipelinePresetsTests
 {
     public static TheoryData<string, IReadOnlyList<string>> StrictPresets => new()
     {
-        { "fix-bug", PipelinePresets.FixBug },
-        { "fix-no-test", PipelinePresets.FixNoTest },
-        { "add-feature", PipelinePresets.AddFeature },
+        { "fix-bug", PipelinePresets.Code },
+        { "fix-no-test", PipelinePresets.Code },
+        { "add-feature", PipelinePresets.Code },
         { "security-scan", PipelinePresets.SecurityScan },
-        { "autonomous", PipelinePresets.Autonomous },
     };
 
     [Theory, MemberData(nameof(StrictPresets))]
@@ -73,7 +72,6 @@ public sealed class BootstrapGatePipelinePresetsTests
     [InlineData("mad-discussion")]
     [InlineData("legal-analysis")]
     [InlineData("init-project")]
-    [InlineData("skill-manager")]
     public void UngatedPreset_DoesNotContainBootstrapGate(string presetName)
     {
         var preset = PipelinePresets.TryResolve(presetName);

@@ -10,15 +10,17 @@ using Microsoft.Extensions.Logging;
 namespace AgentSmith.Application.Services.Handlers;
 
 /// <summary>
-/// p0140e: post-Plan gate that short-circuits the pipeline when GeneratePlanHandler
-/// produced a Plan with zero steps (and the Plan path didn't already park on open
-/// questions). Sets ContextKeys.EmptyPlanSkipped so PipelineExecutor returns Ok
+/// p0140e: post-Plan gate that short-circuits the pipeline when the pipeline's Plan
+/// carries zero steps (p0394a: no built-in preset produces one anymore — reachable
+/// only from operator-authored presets). Sets ContextKeys.EmptyPlanSkipped so
+/// PipelineExecutor returns Ok
 /// without running downstream handlers (Apply / Verify / Commit are pointless on a
 /// no-op plan); emits agent_smith_pipeline_skipped_as_irrelevant_total with reason
 /// label 'empty_plan'.
 /// </summary>
 public sealed class EmptyPlanCheckHandler(
     IEventPublisher eventPublisher,
+    AgentSmithMetrics metrics,
     ILogger<EmptyPlanCheckHandler> logger)
     : ICommandHandler<EmptyPlanCheckContext>
 {
@@ -44,7 +46,7 @@ public sealed class EmptyPlanCheckHandler(
         }
 
         var (projectName, pipelineName) = ResolveLabels(context.Pipeline);
-        AgentSmithMeter.PipelineSkippedAsIrrelevant.Add(1,
+        metrics.PipelineSkippedAsIrrelevant.Add(1,
             new KeyValuePair<string, object?>("project", projectName),
             new KeyValuePair<string, object?>("pipeline", pipelineName),
             new KeyValuePair<string, object?>("reason", EmptyPlanReason));

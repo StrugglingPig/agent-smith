@@ -42,7 +42,7 @@ public sealed class JobsBroadcasterDrainTests : IDisposable
         ctx.Database.Migrate();
         ctx.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;");
         _publisher = new RedisEventPublisher(
-            _redis.Connection, NullLogger<RedisEventPublisher>.Instance);
+            _redis.Connection, new AgentSmith.Infrastructure.Services.Events.EventEnvelopeSerializer(), NullLogger<RedisEventPublisher>.Instance);
     }
 
     public void Dispose()
@@ -81,6 +81,7 @@ public sealed class JobsBroadcasterDrainTests : IDisposable
         run.Status.Should().Be("success");
         run.FinishedAt.Should().NotBeNull();
         CountRunFinishedTrailRows(check).Should().Be(1);
+
     }
 
     [Fact]
@@ -102,8 +103,10 @@ public sealed class JobsBroadcasterDrainTests : IDisposable
 
         // Assert
         persisted.Should().BeTrue("a lagging cursor must catch up to the quiesced stream tail");
+        var trailed = await WaitForTrailRowAsync(CiSafeWait);
         using var check = new AgentSmithDbContext(Options());
         check.Runs.Single(r => r.Id == RunId).Status.Should().Be("success");
+        trailed.Should().BeTrue("the terminal event reaches the trail, not only the run row");
         CountRunFinishedTrailRows(check).Should().Be(1);
     }
 
@@ -148,6 +151,7 @@ public sealed class JobsBroadcasterDrainTests : IDisposable
         return new JobsBroadcaster(
             _redis.Connection, Mock.Of<IRunEventFanout>(), router,
             NullLogger<JobsBroadcaster>.Instance,
+            new AgentSmith.Infrastructure.Services.Events.EventEnvelopeSerializer(),
             provider.GetRequiredService<IRunTerminalReconciler>());
     }
 
@@ -158,6 +162,13 @@ public sealed class JobsBroadcasterDrainTests : IDisposable
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddScoped<IUnitOfWork>(_ => new AgentSmithDbContext(Options()));
+        services.AddSingleton<AgentSmith.Infrastructure.Persistence.Services.RunCheckpointProjection>();
+        services.AddSingleton<AgentSmith.Infrastructure.Persistence.Services.RunExpectationProjection>();
+        services.AddSingleton<AgentSmith.Infrastructure.Persistence.Services.QueuedRunProjection>();
+        services.AddSingleton<AgentSmith.Infrastructure.Persistence.Services.RunSandboxProjection>();
+        services.AddSingleton<AgentSmith.Infrastructure.Persistence.Services.RunStepTimeProjection>();
+        services.AddSingleton<AgentSmith.Infrastructure.Persistence.Services.RunPullRequestProjection>();
+        services.AddSingleton<AgentSmith.Infrastructure.Persistence.Services.RunClassificationProjection>();
         services.AddSingleton<RunEventApplier>();
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<RunDbProjector>();
@@ -187,6 +198,15 @@ public sealed class JobsBroadcasterDrainTests : IDisposable
 
     private Task<bool> WaitForTerminalRowAsync(TimeSpan timeout) =>
         WaitUntilAsync(ctx => ctx.Runs.Any(r => r.Id == RunId && r.FinishedAt != null), timeout);
+
+    /// <summary>
+    /// p0443: the run row and its trail row are two writes, so waiting for the first and
+    /// asserting the second is a race the assertion loses under load. CI hit it on the
+    /// release build: persisted true, status success, trail rows 0 — the projector had
+    /// landed the run and not yet the trail. Wait for what is actually asserted.
+    /// </summary>
+    private Task<bool> WaitForTrailRowAsync(TimeSpan timeout) =>
+        WaitUntilAsync(ctx => CountRunFinishedTrailRows(ctx) == 1, timeout);
 
     private async Task<bool> WaitUntilAsync(Func<AgentSmithDbContext, bool> condition, TimeSpan timeout)
     {

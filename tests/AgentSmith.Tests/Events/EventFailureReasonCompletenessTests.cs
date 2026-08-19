@@ -113,7 +113,6 @@ public sealed class EventFailureReasonCompletenessTests : IDisposable
             new StubSkillsCatalogPath(),
             new ConceptVocabularyLoader(publisher, runContext, new NoOpSystemEventPublisher(), NullLogger<ConceptVocabularyLoader>.Instance),
             new ConceptVocabularyValidator(NullLogger<ConceptVocabularyValidator>.Instance),
-            new SkillIndexBuilder(NullLogger<SkillIndexBuilder>.Instance),
             new ProviderOverrideResolver(new ActiveProviderResolver(new AgentSmithConfig())),
             publisher,
             runContext,
@@ -158,6 +157,8 @@ public sealed class EventFailureReasonCompletenessTests : IDisposable
         public string? CurrentRunId => runId;
         public CallScope? CurrentCallScope => null;
         public IDisposable BeginScope(string id) => new NoOpScope();
+        public int? CurrentStepIndex => null;
+        public IDisposable BeginStepScope(int stepIndex) => new NoOpScope();
         public IDisposable BeginCallScope(string role, string phase, string? repoName = null) => new NoOpScope();
         private sealed class NoOpScope : IDisposable { public void Dispose() { } }
     }

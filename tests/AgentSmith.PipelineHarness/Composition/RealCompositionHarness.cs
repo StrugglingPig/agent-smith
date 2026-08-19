@@ -2,6 +2,7 @@ using AgentSmith.Contracts.Dialogue;
 using AgentSmith.Contracts.Models.ConfigStudio;
 using AgentSmith.Contracts.Models.Configuration;
 using AgentSmith.Contracts.Providers;
+using AgentSmith.Application.Services.Specs;
 using AgentSmith.Contracts.Sandbox;
 using AgentSmith.Contracts.Services;
 using AgentSmith.Infrastructure.Core.Services.Configuration;
@@ -118,7 +119,7 @@ public sealed class RealCompositionHarness : IAsyncDisposable
     private static void RegisterConfigBootstrap(
         IServiceCollection services, string configPath, string configDbPath)
     {
-        var raw = RawConfigYaml.Deserialize(File.ReadAllText(configPath));
+        var raw = new RawConfigYaml().Deserialize(File.ReadAllText(configPath));
         services.RemoveAll<BootstrapConfig>();
         services.AddSingleton(new BootstrapConfig(
             new PersistenceConfig { Provider = "sqlite", ConnectionString = $"Data Source={configDbPath}" },
@@ -137,7 +138,7 @@ public sealed class RealCompositionHarness : IAsyncDisposable
         // shared DB — the config is already seeded, so importing again would be a
         // guarded "store not empty" reject. Skip when already configured.
         if (!docStore.IsEmpty()) return;
-        var raw = RawConfigYaml.Deserialize(File.ReadAllText(configPath));
+        var raw = new RawConfigYaml().Deserialize(File.ReadAllText(configPath));
         var writes = provider.GetRequiredService<ConfigDocumentAssembler>().Decompose(raw)
             .Select(d => new ConfigDocWrite(d.Type, d.Id, d.Doc, null, d.Edges, "harness"))
             .ToList();
@@ -169,7 +170,24 @@ public sealed class RealCompositionHarness : IAsyncDisposable
     {
         chatClient = new ScriptedChatClient();
         services.RemoveAll<IChatClientFactory>();
-        services.AddSingleton<IChatClientFactory>(new ScriptedChatClientFactoryAdapter(chatClient));
+        // p0427: resolved lazily so the scripted factory carries the run-trace writer the
+        // production factory carries — a traced harness run records itself the same way.
+        var scripted = chatClient;
+        services.AddSingleton<IChatClientFactory>(sp => new ScriptedChatClientFactoryAdapter(
+            scripted,
+            sp.GetRequiredService<AgentSmith.Contracts.Runs.IRunTraceWriter>(),
+            sp.GetRequiredService<AgentSmith.Contracts.Events.IRunContextAccessor>()));
+
+        // p0422: the framework's own calls are boundaries here, like the tracker and the
+        // source provider — see HarnessFrameworkCalls for why, and where the real ones are
+        // exercised instead.
+        services.RemoveAll<ISpecCutReviewer>();
+        services.AddSingleton<ISpecCutReviewer, HarnessSpecCutReviewer>();
+        services.RemoveAll<ISpecAccountant>();
+        services.AddSingleton<HarnessSpecAccountant>();
+        services.AddSingleton<ISpecAccountant>(sp => sp.GetRequiredService<HarnessSpecAccountant>());
+        services.RemoveAll<Application.Services.Scans.IFindingRefuter>(); // p0429
+        services.AddSingleton<Application.Services.Scans.IFindingRefuter, HarnessFindingRefuter>();
 
         services.RemoveAll<ISourceProviderFactory>();
         services.AddSingleton<ISourceProviderFactory>(new StubSourceProviderFactory());

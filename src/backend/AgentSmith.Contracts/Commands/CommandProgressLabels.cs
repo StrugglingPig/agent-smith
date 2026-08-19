@@ -26,6 +26,7 @@ public static partial class CommandNames
         [FetchTicket] = "Fetching ticket",
         [ScopeRepos] = "Scoping repositories", // p0331
         [CheckoutSource] = "Checking out source",
+        [RunPreflight] = "Checking preconditions", // p0428
         [BootstrapProject] = "Bootstrapping project context",
         [LoadCodeMap] = "Loading code map",
         [LoadCodingPrinciples] = "Loading coding principles",
@@ -33,7 +34,14 @@ public static partial class CommandNames
         [LoadContext] = "Loading project context",
         [AnalyzeCode] = "Analyzing codebase",
         [NegotiateExpectation] = "Negotiating expectation", // p0328
-        [GeneratePlan] = "Generating plan",
+        [DeriveSpec] = "Deriving the phase specs",
+        [SpecHandback] = "Handing the ticket back",
+        [PhaseSequence] = "Planning the phase sequence",
+        [SelectPhase] = "Starting the phase",
+        // p0394a: retired steps, kept by literal name so progress reporting of
+        // run records persisted before the retirement keeps its labels.
+        ["GeneratePlanCommand"] = "Generating plan",
+        ["PlanOpenQuestionsCommand"] = "Posting Plan open questions",
         [Approval] = "Awaiting approval",
         [AgenticExecute] = "Executing plan",
         [AgenticMaster] = "Running master skill",
@@ -70,6 +78,9 @@ public static partial class CommandNames
         [DependencyAudit] = "Auditing dependencies",
         [CompressSecurityFindings] = "Compressing security findings",
         [MergeMasterFindings] = "Merging master findings",
+        [RatifyScanContract] = "Stating what the scan looks for",
+        [SubstantiateFindings] = "Substantiating findings against the source",
+        [AccountScanCoverage] = "Accounting for the scan's coverage",
         [CompressApiScanFindings] = "Compressing API scan findings",
         [SecurityTrend] = "Analyzing security trends",
         [SecuritySnapshotWrite] = "Writing security snapshot",
@@ -88,8 +99,8 @@ public static partial class CommandNames
         [LoadCatalog] = "Loading skill catalog",
         [PipelineNameInitializer] = "Publishing pipeline name",
         [BootstrapCheck] = "Checking bootstrap files",
-        [PlanOpenQuestions] = "Posting Plan open questions",
         [RunVerifyPhase] = "Running verify phase",
+        [VerifyPhase] = "Building and running tests", // p0393
         [BootstrapGate] = "Verifying bootstrap files",
         [PublishProjectLanguage] = "Publishing project language",
         [BootstrapDispatch] = "Dispatching bootstrap skill",

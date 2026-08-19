@@ -1,3 +1,4 @@
+using AgentSmith.Tests.TestSupport;
 using AgentSmith.Contracts.Events;
 using AgentSmith.Contracts.Models.Configuration;
 using AgentSmith.Contracts.Sandbox;
@@ -27,10 +28,7 @@ public sealed class CapacityBudgetTests : IDisposable
 
     public CapacityBudgetTests()
     {
-        _connection = new SqliteConnection("Data Source=:memory:");
-        _connection.Open();
-        using var ctx = new AgentSmithDbContext(DbOptions());
-        ctx.Database.Migrate();
+        _connection = MigratedStoreTemplate.OpenCopy();
     }
 
     public void Dispose() => _connection.Dispose();
@@ -107,7 +105,7 @@ public sealed class CapacityBudgetTests : IDisposable
         await budget.RecordAsync("run1", Footprint(4 * Gi), CancellationToken.None);
         await budget.TryReserveAsync("run1", CancellationToken.None);
 
-        await new RunEventApplier(budget).ApplyAsync(
+        await new RunEventApplier(new(), new(), new(), new(), new(), new(), new(), budget).ApplyAsync(
             new AgentSmithDbContext(DbOptions()),
             new RunFinishedEvent("run1", "success", "https://pr", "done", DateTimeOffset.UtcNow),
             CancellationToken.None);
@@ -134,7 +132,7 @@ public sealed class CapacityBudgetTests : IDisposable
         await budget.RecordAsync("run2", Footprint(4 * Gi), CancellationToken.None);
         await budget.TryReserveAsync("run2", CancellationToken.None);
 
-        await new RunEventApplier(budget).ApplyAsync(
+        await new RunEventApplier(new(), new(), new(), new(), new(), new(), new(), budget).ApplyAsync(
             new AgentSmithDbContext(DbOptions()),
             new RunFinishedEvent("run2", "waiting_for_input", null, "parked", DateTimeOffset.UtcNow),
             CancellationToken.None);

@@ -23,136 +23,138 @@ public static partial class PipelinePresets
     {
         All = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
         {
-            ["fix-bug"] = FixBug,
-            ["fix-no-test"] = FixNoTest,
+            [CodeName] = Code,
             ["init-project"] = InitProject,
-            ["add-feature"] = AddFeature,
             ["mad-discussion"] = MadDiscussion,
             ["legal-analysis"] = LegalAnalysis,
             ["security-scan"] = SecurityScan,
             ["api-security-scan"] = ApiSecurityScan,
-            ["skill-manager"] = SkillManager,
-            ["autonomous"] = Autonomous,
             ["pr-review"] = PrReview,
             [SpecDialogName] = SpecDialog,
-            [PhaseExecutionName] = PhaseExecution,
         };
         Names = All.Keys.ToList();
     }
 
     public static IReadOnlyList<string>? TryResolve(string name) =>
-        All.GetValueOrDefault(name);
+        All.GetValueOrDefault(name)
+        ?? (PresetAliases.TryGetValue(name, out var target) ? All.GetValueOrDefault(target) : null);
 
     private static readonly Dictionary<string, PipelineType> PipelineTypes = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["fix-bug"] = PipelineType.Hierarchical,
-        ["fix-no-test"] = PipelineType.Hierarchical,
-        ["add-feature"] = PipelineType.Hierarchical,
+        [CodeName] = PipelineType.Hierarchical,
         ["init-project"] = PipelineType.Discussion,
         ["security-scan"] = PipelineType.Structured,
         ["api-security-scan"] = PipelineType.Structured,
         ["mad-discussion"] = PipelineType.Discussion,
         ["legal-analysis"] = PipelineType.Discussion,
-        ["skill-manager"] = PipelineType.Discussion,
-        ["autonomous"] = PipelineType.Discussion,
         // p0167a: findings-emitting like the scan presets — review output is
         // structured observations rendered as PR comments, not code changes.
         ["pr-review"] = PipelineType.Structured,
         [SpecDialogName] = PipelineType.Discussion,
-        [PhaseExecutionName] = PipelineType.Hierarchical,
     };
 
     /// <summary>
     /// Returns the pipeline interaction type. Defaults to Discussion for unknown pipelines.
     /// </summary>
     public static PipelineType GetPipelineType(string pipelineName) =>
-        PipelineTypes.GetValueOrDefault(pipelineName, PipelineType.Discussion);
+        PipelineTypes.GetValueOrDefault(Canonical(pipelineName), PipelineType.Discussion);
 
     // p0241: the keystone keys "is this a code-changing run?" / "must its tests be
     // green?" off an explicit allow-list, NOT off PipelineType (an interaction-
     // pattern enum) — coupling the success rule to the interaction shape would be
-    // fragile. fix-no-test changes code but deliberately skips the test gate.
+    // fragile. p0393 collapsed the four coding presets into one, so the list is one
+    // entry; it stays a list rather than becoming `== CodeName` because the property
+    // being asserted is "this preset ships code", which a future preset may also have.
     private static readonly HashSet<string> CodeChangingPresets = new(StringComparer.OrdinalIgnoreCase)
     {
-        "fix-bug", "fix-no-test", "add-feature", PhaseExecutionName,
-    };
-
-    private static readonly HashSet<string> GreenTestPresets = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "fix-bug", "add-feature", PhaseExecutionName,
+        CodeName,
     };
 
     /// <summary>
-    /// p0241: true when the preset is expected to modify source (a run that ships
-    /// nothing is a failure, not a hollow success). False for read-only presets
-    /// (security/legal/mad/init) which legitimately finish with zero changes.
+    /// p0241: true when the preset is expected to modify source. p0421: this no longer
+    /// decides whether a run DELIVERED — that is read from the accounts every phase gives
+    /// against the branch, for every preset alike. What is left is what the answer is
+    /// actually about: whether a run has a master loop to re-drive and needs a sandbox
+    /// sized for building.
     /// </summary>
     public static bool ExpectsCodeChanges(string pipelineName) =>
-        CodeChangingPresets.Contains(pipelineName);
+        CodeChangingPresets.Contains(Canonical(pipelineName));
 
     /// <summary>
-    /// p0241: true when a successful run additionally requires a green build/test
-    /// verdict. Excludes fix-no-test (changes code but skips tests by design).
+    /// p0312a: every pipeline resolves its skills from the catalog root, because
+    /// every skill lives under <c>skills/_masters/</c> as of catalog 4.0.0. The
+    /// per-category map this replaces was already fiction for the p0179-collapsed
+    /// presets, and it mis-mapped skill-manager/autonomous to skills/coding so their
+    /// own role skills never loaded through the default path at all.
     /// </summary>
-    public static bool ExpectsGreenTests(string pipelineName) =>
-        GreenTestPresets.Contains(pipelineName);
+    public const string DefaultSkillsPath = "skills";
 
     /// <summary>
-    /// p0131c-pre: true when the named preset emits a single Plan-phase batch
-    /// (no <see cref="CommandNames.RunReviewPhase"/> / <see cref="CommandNames.RunFinalPhase"/>
-    /// steps). Drives <c>StructuredTriageStrategy</c>'s phase-collapse logic so
-    /// LLM-emitted Review-/Final-phase skill assignments don't get silently
-    /// dropped on presets that don't run those phases.
-    /// Unknown pipeline names default to <c>true</c> (single-phase) — safer
-    /// because emitting Review/Final commands for an unknown preset would
-    /// dispatch to handlers that may not be in the run.
+    /// Returns the default skills path for a given pipeline name. One root for all
+    /// of them — the parameter stays so callers and project overrides keep their
+    /// shape while the resolution is uniform.
     /// </summary>
-    public static bool IsSinglePhase(string pipelineName)
-    {
-        var preset = TryResolve(pipelineName);
-        if (preset is null) return true;
-        return !preset.Contains(CommandNames.RunReviewPhase, StringComparer.Ordinal)
-            && !preset.Contains(CommandNames.RunFinalPhase, StringComparer.Ordinal);
-    }
+    public static string GetDefaultSkillsPath(string pipelineName) => DefaultSkillsPath;
 
     /// <summary>
-    /// Default skills directory per pipeline preset.
-    /// Used when no explicit skills_path is configured in the project.
+    /// p0393: preset names that RESOLVE to another preset. An operator configuration
+    /// naming one keeps working and logs the replacement — renaming by alias rather than
+    /// by breaking configuration, because preset names live in triggers (default_pipeline)
+    /// and projects that agent-smith does not own.
     /// </summary>
-    private static readonly Dictionary<string, string> DefaultSkillsPaths = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["fix-bug"] = "skills/coding",
-        ["fix-no-test"] = "skills/coding",
-        ["add-feature"] = "skills/coding",
-        ["init-project"] = "skills/coding",
-        ["security-scan"] = "skills/security",
-        ["api-security-scan"] = "skills/api-security",
-        ["legal-analysis"] = "skills/legal",
-        ["mad-discussion"] = "skills/mad",
-        ["skill-manager"] = "skills/coding",
-        ["autonomous"] = "skills/coding",
-        ["pr-review"] = "skills/pr-review", // roster ships in p0167b (agent-smith-skills)
-        [PhaseExecutionName] = "skills/coding",
-    };
+    public static readonly IReadOnlyDictionary<string, string> PresetAliases =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["fix-bug"] = CodeName,
+            ["fix-no-test"] = CodeName,
+            ["add-feature"] = CodeName,
+            [PhaseExecutionName] = CodeName,
+        };
+
+    /// <summary>The preset an alias resolves to, or null when the name is not an alias.</summary>
+    public static string? ResolveAlias(string pipelineName) =>
+        PresetAliases.GetValueOrDefault(pipelineName);
 
     /// <summary>
-    /// Returns the default skills path for a given pipeline name.
-    /// Falls back to "skills/coding" if the pipeline is not mapped.
+    /// The canonical preset name: an alias resolved to its target, anything else unchanged.
+    /// EVERY per-preset classification goes through this. Resolving the command list while
+    /// classifying the raw name would make an alias half-real — the run would execute `code`
+    /// but be sized as a non-code pipeline and judged by a keystone that expects no diff,
+    /// which is worse than not aliasing at all.
     /// </summary>
-    public static string GetDefaultSkillsPath(string pipelineName) =>
-        DefaultSkillsPaths.GetValueOrDefault(pipelineName, "skills/coding");
+    public static string Canonical(string pipelineName) =>
+        PresetAliases.GetValueOrDefault(pipelineName, pipelineName);
 
     /// <summary>
-    /// Maps a pipeline name to the SkillRound-family command its handlers expect.
-    /// security-scan → SecuritySkillRoundCommand, api-security-scan → ApiSecuritySkillRoundCommand,
-    /// pr-review → PrReviewSkillRoundCommand, everything else → SkillRoundCommand.
-    /// Filter assignments always emit FilterRoundCommand.
+    /// Every name a CONFIGURATION may legitimately carry: the current presets plus the
+    /// retired aliases. Distinct from <see cref="Names"/>, which is what agent-smith
+    /// OFFERS — an alias must keep validating and must not be presented as a choice.
     /// </summary>
-    public static string GetSkillRoundCommandName(string pipelineName) => pipelineName.ToLowerInvariant() switch
-    {
-        "security-scan" => CommandNames.SecuritySkillRound,
-        "api-security-scan" => CommandNames.ApiSecuritySkillRound,
-        "pr-review" => CommandNames.PrReviewSkillRound,
-        _ => CommandNames.SkillRound
-    };
+    public static bool IsAcceptedName(string pipelineName) =>
+        All.ContainsKey(pipelineName) || PresetAliases.ContainsKey(pipelineName);
+
+    /// <summary>
+    /// p0312a: presets that were removed rather than renamed, with the reason a
+    /// configuration naming one still validates instead of failing at load.
+    /// skill-manager and autonomous carried the Triage/SkillRound choreography that
+    /// no longer exists; reactivating either means authoring a master and declaring
+    /// an <c>AgenticMaster</c> preset, not restoring this machinery.
+    /// </summary>
+    public static readonly IReadOnlyDictionary<string, string> RetiredPresets =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["skill-manager"] =
+                "skill-manager was retired in p0312a together with the Triage/SkillRound "
+                + "machinery it was the last consumer of. Re-enable it by authoring a "
+                + "skill-manager master and declaring an AgenticMaster-shaped preset.",
+            ["autonomous"] =
+                "autonomous was retired in p0312a together with the Triage/SkillRound "
+                + "machinery it was the last consumer of. Re-enable it by authoring an "
+                + "autonomous master and declaring an AgenticMaster-shaped preset.",
+        };
+
+    /// <summary>The operator-facing reason a retired preset name no longer resolves.</summary>
+    public static string? RetiredReason(string pipelineName) =>
+        RetiredPresets.GetValueOrDefault(pipelineName);
+
 }

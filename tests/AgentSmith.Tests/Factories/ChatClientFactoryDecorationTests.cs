@@ -53,6 +53,8 @@ public sealed class ChatClientFactoryDecorationTests
             new ModelPricingResolver(),
             new AgentSmith.Infrastructure.Services.RateLimiting.LlmRateLimiterRegistry(
                 NullLogger<AgentSmith.Infrastructure.Services.RateLimiting.LlmRateLimiterRegistry>.Instance),
+            new AgentSmith.Infrastructure.Services.RateLimiting.ThrottleWaitReporter(),
+            new AgentSmith.Contracts.Runs.NullRunTraceWriter(),
             NullLoggerFactory.Instance);
 
     private sealed class StubBuilder : IChatClientBuilder
@@ -97,6 +99,8 @@ public sealed class ChatClientFactoryDecorationTests
         public string? CurrentRunId => runId;
         public CallScope? CurrentCallScope => null;
         public IDisposable BeginScope(string id) => new NoOpScope();
+        public int? CurrentStepIndex => null;
+        public IDisposable BeginStepScope(int stepIndex) => new NoOpScope();
         public IDisposable BeginCallScope(string role, string phase, string? repoName = null) => new NoOpScope();
         private sealed class NoOpScope : IDisposable { public void Dispose() { } }
     }

@@ -1,5 +1,6 @@
 using System.CommandLine;
 using System.CommandLine.Invocation;
+using AgentSmith.Cli.Services;
 using AgentSmith.Contracts.Models.ConfigStudio;
 using AgentSmith.Contracts.Services;
 using AgentSmith.Domain.Exceptions;
@@ -46,14 +47,40 @@ internal static class ConfigCommand
             ctx.ParseResult.GetValueForArgument(file),
             ctx.ParseResult.GetValueForOption(force)));
 
-        return new Command("config", "Config store DR + cutover (server mode).") { export, import };
+        var validate = new Command(
+            "validate",
+            "Report what the server would report about this configuration, without starting one.")
+        {
+            configOption, verboseOption,
+        };
+        validate.SetHandler((InvocationContext ctx) => ctx.ExitCode = Validate(
+            ctx.ParseResult.GetValueForOption(configOption)!,
+            ctx.ParseResult.GetValueForOption(verboseOption)));
+
+        return new Command("config", "Config store DR + cutover (server mode).")
+        {
+            export, import, validate,
+        };
+    }
+
+    /// <summary>
+    /// p0391b: same rules, same findings, printed. Exit 1 on any blocking finding — the
+    /// server would stay up and disable those units, but a one-shot check exists to be
+    /// gated on, and an operator who runs this before a rollout wants the non-zero code.
+    /// </summary>
+    private static int Validate(string configPath, bool verbose)
+    {
+        using var services = ServiceProviderFactory.Build(configPath, verbose, headless: true);
+        var findings = services.GetRequiredService<ConfigValidator>().Validate(configPath);
+        StartupFindingPrinter.Print(findings, Console.Out);
+        return findings.Any(f => f.IsBlocking) ? 1 : 0;
     }
 
     private static async Task<int> ExportAsync(string configPath, bool verbose, string? output)
     {
         await using var db = BuildContext(configPath, verbose);
         var raw = new ConfigDocumentAssembler().Assemble(new ConfigDocumentRepository(db).LoadAll());
-        var yaml = RawConfigYaml.Serialize(raw);
+        var yaml = new RawConfigYaml().Serialize(raw);
         if (string.IsNullOrEmpty(output)) Console.WriteLine(yaml);
         else await File.WriteAllTextAsync(output, yaml);
         return 0;
@@ -66,7 +93,7 @@ internal static class ConfigCommand
             Console.Error.WriteLine($"Import file not found: {yamlPath}");
             return 1;
         }
-        var raw = RawConfigYaml.Deserialize(await File.ReadAllTextAsync(yamlPath));
+        var raw = new RawConfigYaml().Deserialize(await File.ReadAllTextAsync(yamlPath));
         // persistence is bootstrap-only (read from the file/env before the DB), so it is
         // never imported into the DB it describes — the same exclusion the UI import applies.
         var writes = new ConfigDocumentAssembler().Decompose(raw)
@@ -91,7 +118,7 @@ internal static class ConfigCommand
 
     private static AgentSmithDbContext BuildContext(string configPath, bool verbose)
     {
-        var services = ServiceProviderFactory.Build(verbose, headless: true, configPath: configPath);
+        var services = ServiceProviderFactory.Build(configPath, verbose, headless: true);
         var persistence = services.GetRequiredService<IConfigurationLoader>().LoadConfig(configPath).Persistence;
         var provider = Enum.TryParse<PersistenceProvider>(persistence.Provider, ignoreCase: true, out var p)
             ? p : PersistenceProvider.Sqlite;

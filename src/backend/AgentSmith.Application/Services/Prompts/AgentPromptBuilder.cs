@@ -5,113 +5,13 @@ using AgentSmith.Domain.Models;
 namespace AgentSmith.Application.Services.Prompts;
 
 /// <summary>
-/// Shared prompt building logic for plan generation and execution.
+/// Composes the execution system/user prompts for the coding master.
 /// Migrated from Infrastructure during the M.E.AI refactor (p0119a) so
 /// Application-layer handlers can reach it without an Infrastructure dependency.
+/// p0415: the plan-prompt half went with the retired GeneratePlan command.
 /// </summary>
 public sealed class AgentPromptBuilder(IPromptCatalog prompts)
 {
-    public string BuildPlanSystemPrompt(
-        string codingPrinciples, IReadOnlyDictionary<string, string>? repoCodeMaps,
-        string? projectContext = null, string expectationSection = "")
-    {
-        var rendered = prompts.Render("agent-plan-system", new Dictionary<string, string>
-        {
-            ["ProjectContextSection"] = BuildProjectContextSection(projectContext),
-            ["CodingPrinciples"] = codingPrinciples,
-            ["CodeMapSection"] = BuildCodeMapSection(repoCodeMaps),
-            // p0328: the ratified acceptance contract; empty when the run
-            // negotiated nothing.
-            ["ExpectationSection"] = expectationSection,
-        });
-        // p0384: appended AFTER Render because the template is a pinned skill
-        // resource with a fixed token set — same pattern as the master's
-        // toolchain section. Multi-repo runs only.
-        return rendered + BuildMultiRepoPlanRulesSection(repoCodeMaps?.Keys);
-    }
-
-    public string BuildPlanUserPrompt(
-        Ticket ticket, IReadOnlyDictionary<string, ProjectMap> repoProjectMaps,
-        IReadOnlyDictionary<string, string>? planAnswers = null)
-    {
-        // p0316: ticket fields are untrusted — delimit them so an embedded injection
-        // reads as requirement data, not an instruction to the planner.
-        var ticketBlock = TicketPromptDelimiters.Wrap($"""
-            **ID:** {ticket.Id}
-            **Title:** {ticket.Title}
-            **Description:** {ticket.Description}
-            **Acceptance Criteria:** {ticket.AcceptanceCriteria ?? "None specified"}
-            """);
-
-        // p0384: one analysis block PER scoped repo — a single-repo run is a
-        // dictionary of one flowing through the same path, never a collapse.
-        var analyses = string.Join("\n\n", repoProjectMaps
-            .Select(kv => BuildRepoAnalysisBlock(kv.Key, kv.Value)));
-
-        return $"""
-            {ticketBlock}
-
-            {analyses}
-            {BuildOperatorAnswersSection(planAnswers)}
-            """;
-    }
-
-    // p0384: the per-repo codebase analysis block. The heading names the repo so
-    // the planner can target steps at it; the name doubles as the path prefix
-    // the filesystem tools route on.
-    internal static string BuildRepoAnalysisBlock(string repoName, ProjectMap projectMap)
-    {
-        var modules = string.Join('\n', projectMap.Modules
-            .Where(m => m.Role == ModuleRole.Production)
-            .Select(m => $"  - {m.Path}"));
-        var testProjects = projectMap.TestProjects.Count == 0 ? "(none)" :
-            string.Join('\n', projectMap.TestProjects.Select(t =>
-                $"  - {t.Path} ({t.Framework}, {t.FileCount} test file(s))"));
-        var entryPoints = projectMap.EntryPoints.Count == 0 ? "(none discovered)" :
-            string.Join('\n', projectMap.EntryPoints.Select(e => $"  - {e}"));
-        var frameworks = projectMap.Frameworks.Count == 0 ? "Unknown" :
-            string.Join(", ", projectMap.Frameworks);
-
-        return $"""
-            ## Repository: {repoName}
-            **Language:** {projectMap.PrimaryLanguage}
-            **Frameworks:** {frameworks}
-
-            ### Modules (production)
-            {modules}
-
-            ### Test Projects
-            {testProjects}
-
-            ### Entry Points
-            {entryPoints}
-            """;
-    }
-
-    // p0384: multi-repo plan discipline — every step must name its repo (the
-    // repo-prefixed target the filesystem tools already route on) and every
-    // scoped repo must be either covered or explicitly ruled out with a reason.
-    // Single-repo runs emit nothing (no prefix convention to enforce).
-    internal static string BuildMultiRepoPlanRulesSection(IEnumerable<string>? repoNames)
-    {
-        var names = repoNames?.ToList() ?? [];
-        if (names.Count <= 1) return string.Empty;
-        var bullets = string.Join("\n", names.Select(n => $"  - {n}"));
-        return $"""
-
-
-            ## Multi-repository plan rules
-            This run spans {names.Count} repositories:
-            {bullets}
-            - Every plan step's target file MUST be prefixed with the repository it
-              belongs to (e.g. `{names[0]}/src/File.ext`) — the same prefix the
-              filesystem tools route on.
-            - Every repository listed above must either be covered by at least one
-              step, or be explicitly declared not affected — with a reason — in the
-              plan summary. Never silently ignore a repository in scope.
-            """;
-    }
-
     internal static string BuildOperatorAnswersSection(
         IReadOnlyDictionary<string, string>? planAnswers)
     {
@@ -153,6 +53,17 @@ public sealed class AgentPromptBuilder(IPromptCatalog prompts)
             ["PlanSection"] = string.Empty,
             ["RunRecordDir"] = string.Empty,
             ["MaxFixIterations"] = string.Empty,
+            // p0313: these four were referenced by the coding master and bound only by
+            // AgenticMasterHandler, so GenerateTests/GenerateDocs shipped the literal
+            // strings "{WorkSpecSection}" and "{ProgressLedgerSection}" to the model on
+            // every add-feature run. They were invisible to the strict-render check
+            // because MasterPromptTokens.All had not been extended when they landed —
+            // MasterPromptTokenDriftTests now fails on that omission instead.
+            ["SpecSection"] = string.Empty,
+            ["WorkSpecSection"] = string.Empty,
+            ["ProgressLedgerSection"] = string.Empty,
+            ["MemoryIndexSection"] = string.Empty,
+            ["PrDiffSection"] = string.Empty,
         });
     }
 

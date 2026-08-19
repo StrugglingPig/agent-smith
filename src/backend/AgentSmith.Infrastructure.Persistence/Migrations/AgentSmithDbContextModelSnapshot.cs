@@ -341,6 +341,12 @@ namespace AgentSmith.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("PlannedFirstStepIndex")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PlannedStepsJson")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Platform")
                         .HasColumnType("TEXT");
 
@@ -392,6 +398,12 @@ namespace AgentSmith.Infrastructure.Persistence.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("WorkShape")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("WorkShapeReason")
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
@@ -560,6 +572,9 @@ namespace AgentSmith.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("Category")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("TEXT");
 
@@ -574,6 +589,9 @@ namespace AgentSmith.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(191)
                         .HasColumnType("TEXT");
+
+                    b.Property<int?>("StepIndex")
+                        .HasColumnType("INTEGER");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("TEXT");
@@ -614,6 +632,9 @@ namespace AgentSmith.Infrastructure.Persistence.Migrations
                     b.Property<long>("Seq")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int?>("StepIndex")
+                        .HasColumnType("INTEGER");
+
                     b.Property<DateTimeOffset>("Timestamp")
                         .HasColumnType("TEXT");
 
@@ -627,6 +648,8 @@ namespace AgentSmith.Infrastructure.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("RunId");
+
+                    b.HasIndex("RunId", "StepIndex", "Seq");
 
                     b.ToTable("RunEvents");
                 });
@@ -718,6 +741,9 @@ namespace AgentSmith.Infrastructure.Persistence.Migrations
                         .HasMaxLength(191)
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("StepIndex")
+                        .HasColumnType("INTEGER");
+
                     b.Property<long>("TokensIn")
                         .HasColumnType("INTEGER");
 
@@ -807,6 +833,9 @@ namespace AgentSmith.Infrastructure.Persistence.Migrations
                     b.Property<string>("Status")
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("StepIndex")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("ToolchainImage")
                         .HasColumnType("TEXT");
 
@@ -838,6 +867,9 @@ namespace AgentSmith.Infrastructure.Persistence.Migrations
                     b.Property<double?>("DurationSeconds")
                         .HasColumnType("REAL");
 
+                    b.Property<long>("LlmMs")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("ResultMessage")
                         .HasColumnType("TEXT");
 
@@ -845,6 +877,9 @@ namespace AgentSmith.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(191)
                         .HasColumnType("TEXT");
+
+                    b.Property<long>("SandboxMs")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -856,6 +891,9 @@ namespace AgentSmith.Infrastructure.Persistence.Migrations
                     b.Property<string>("StepName")
                         .IsRequired()
                         .HasColumnType("TEXT");
+
+                    b.Property<long>("ThrottleWaitMs")
+                        .HasColumnType("INTEGER");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("TEXT");
@@ -934,6 +972,59 @@ namespace AgentSmith.Infrastructure.Persistence.Migrations
                     b.HasIndex("Platform", "ThreadId");
 
                     b.ToTable("SpecDialogSessions");
+                });
+
+            modelBuilder.Entity("AgentSmith.Infrastructure.Persistence.Entities.TicketSpecSet", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CarryingRepo")
+                        .IsRequired()
+                        .HasMaxLength(191)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("HandbackSourceSha")
+                        .HasMaxLength(191)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("LastHandbackCase")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Project")
+                        .IsRequired()
+                        .HasMaxLength(191)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("RepeatedHandbackCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("RevisionNumber")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("RevisionSha")
+                        .IsRequired()
+                        .HasMaxLength(191)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SpecKey")
+                        .IsRequired()
+                        .HasMaxLength(191)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Project", "SpecKey")
+                        .IsUnique();
+
+                    b.ToTable("TicketSpecSets");
                 });
 
             modelBuilder.Entity("AgentSmith.Infrastructure.Persistence.Entities.ConfigRef", b =>

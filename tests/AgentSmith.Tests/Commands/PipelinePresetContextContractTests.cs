@@ -26,16 +26,11 @@ namespace AgentSmith.Tests.Commands;
 /// </summary>
 public sealed class PipelinePresetContextContractTests
 {
-    // p0204 (partial): skill-manager's misplaced LoadContext step is
-    // removed, but CompileDiscussion (and likely others) ALSO requires a
-    // Repository the preset doesn't provide. The preset has deeper shape
-    // issues than the original p0204 spec admitted — full rework deferred
-    // to p0204a. Keep the entry so the contract test stays green for the
-    // remaining 9 presets; the meta-test KnownBrokenPresets_AreStillBroken
-    // forces the operator to revisit when somebody thinks they've fixed
-    // the deeper issue.
-    private static readonly HashSet<string> KnownBrokenPresets =
-        new(StringComparer.OrdinalIgnoreCase) { "skill-manager" };
+    // p0312a emptied this set: the only entry was skill-manager, whose deeper
+    // shape issues (CompileDiscussion needing a Repository the preset never
+    // provided) are moot now that the preset is retired. An empty set is the
+    // honest state — every surviving preset satisfies the contract.
+    private static readonly HashSet<string> KnownBrokenPresets = new(StringComparer.OrdinalIgnoreCase);
 
     public static readonly IEnumerable<object[]> AllPresets =
         PipelinePresets.Names
@@ -46,7 +41,7 @@ public sealed class PipelinePresetContextContractTests
     [MemberData(nameof(AllPresets))]
     public void PipelinePresetContextContract_AllStepsBuildContext(string presetName)
     {
-        var preset = PipelinePresets.TryResolve(presetName)!.ToList();
+        var preset = PipelinePresets.Effective(presetName).ToList();
         var factory = new CommandContextFactory(ResolveBuilders());
         var project = CreateProjectConfig(presetName);
 
@@ -73,7 +68,7 @@ public sealed class PipelinePresetContextContractTests
         // p0202e: EnsurePrerequisites sits AFTER AnalyzeCode (so the
         // analyzer-derived, repo-state-aware command is available) and BEFORE
         // the master/Test (so deps exist when code runs).
-        var preset = PipelinePresets.TryResolve(presetName)!.ToList();
+        var preset = PipelinePresets.Effective(presetName).ToList();
 
         preset.Should().Contain(CommandNames.EnsurePrerequisites);
         var install = preset.IndexOf(CommandNames.EnsurePrerequisites);
@@ -237,7 +232,7 @@ public sealed class PipelinePresetContextContractTests
             // CompileFindings, CompileDiscussion, CompileKnowledge,
             // QueryKnowledge, LoadRuns, WriteTickets, Triage, SkillRound,
             // SecuritySkillRound, ApiSecuritySkillRound, FilterRound,
-            // ConvergenceCheck, GeneratePlan, EmptyPlanCheck, PlanOpenQuestions,
+            // ConvergenceCheck, EmptyPlanCheck,
             // PersistWorkBranch, RunReviewPhase, RunFinalPhase, RunVerifyPhase,
             // SwitchSkill, Ask, CompressSecurityFindings, CompressApiScanFindings.
         }

@@ -20,6 +20,8 @@ public sealed class FixNoTestTests
         // hardens the fast tier to close that gap.
         await using var harness = RealCompositionHarness.Build(FixturePaths.For(FixturePaths.Default));
         harness.ChatClient
+            // p0393: fix-no-test was the preset WITHOUT expectation negotiation; it now
+            // runs `code`, which keeps that step until p0393a gives every run a spec.
             .EnqueueToolCall("write_file", """{"path":"primary/src/Quick.cs","content":"// quick fix"}""")
             .EnqueueText("Done.");
 
@@ -38,12 +40,21 @@ public sealed class FixNoTestTests
         // p0241: fix-no-test skips the test gate, but it is still a code-changing
         // preset — a run that ships nothing is a failure, not a hollow success.
         await using var harness = RealCompositionHarness.Build(FixturePaths.For(FixturePaths.Default));
-        harness.ChatClient.EnqueueText("No changes needed.");
+        harness.ChatClient
+            // Call 1 is AnalyzeCode's project analyzer — this harness does not stub it.
+            .EnqueueText("{}")
+            // p0393: the run reaches the master only after the expectation draft.
+            .EnqueueText("No changes needed.");
 
         var runner = new PipelineRunner(harness.Services);
         var result = await runner.RunAsync("fix-no-test");
 
-        result.IsSuccess.Should().BeFalse("a fix-no-test that changed no source must not be a success");
-        result.Message.Should().Contain("no code changes");
+        // p0421: delivery is judged by the RATIFIED criteria, and this run ratified none
+        // — its scripted derivation returns "{}". A gate that failed it anyway would be
+        // inventing a requirement nobody stated, which is exactly what the old preset list
+        // did to mad, legal and security. What a run WITH criteria owes is covered by
+        // RunDeliveryGateTests; what it owes with none is nothing.
+        result.IsSuccess.Should().BeTrue(
+            "a run that ratified no criteria is not judged for delivery — there is nothing to judge");
     }
 }

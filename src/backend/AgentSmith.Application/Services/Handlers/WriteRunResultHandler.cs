@@ -1,5 +1,6 @@
 using System.Text.Json;
 using AgentSmith.Application.Models;
+using AgentSmith.Application.Services.Specs;
 using AgentSmith.Contracts.Commands;
 using AgentSmith.Contracts.Dialogue;
 using AgentSmith.Contracts.Events;
@@ -38,6 +39,7 @@ public sealed class WriteRunResultHandler(
     IRunArtifactStore artifactStore,
     IEventPublisher events,
     Memory.RunNarrativeMemoryWriter narrativeWriter, // p0380: green-run curated memory
+    SandboxTargets sandboxTargets,
     ILogger<WriteRunResultHandler> logger)
     : ICommandHandler<WriteRunResultContext>
 {
@@ -280,7 +282,10 @@ public sealed class WriteRunResultHandler(
         var resultMd = RunResultFormatter.FormatResult(
             context.Ticket!, context.Plan, repoChanges, runId, duration, cost, trail, decisions, trend,
             dialogueEntries.Count > 0 ? dialogueEntries : null, perSkillBreakdown, topology, repoName, failureReason,
-            ignoredInstructions, expectation);
+            ignoredInstructions, expectation,
+            // p0429a: what the run — or the scan — accounted for, itemised beside the
+            // findings instead of only inside the gate that read it.
+            RunAccountSection.Build(context.Pipeline));
         await reader.WriteAsync(Path.Combine(runDir, "result.md"), resultMd, ct);
         if (cacheResult) await TryStoreResultAsync(runId, resultMd, ct);
 
@@ -400,9 +405,9 @@ public sealed class WriteRunResultHandler(
         }
     }
 
-    private static ISandbox? ResolvePerRepoSandbox(PipelineContext pipeline, RepoConnection repo)
+    private ISandbox? ResolvePerRepoSandbox(PipelineContext pipeline, RepoConnection repo)
     {
-        var matches = SandboxTargets.SandboxesForRepo(pipeline, repo);
+        var matches = sandboxTargets.SandboxesForRepo(pipeline, repo);
         if (matches.Count > 0) return matches[0].Value;
         return pipeline.TryGet<ISandbox>(ContextKeys.Sandbox, out var legacy) ? legacy : null;
     }
@@ -497,22 +502,12 @@ public sealed class WriteRunResultHandler(
     {
         var pipelineName = context.Pipeline.TryGet<string>(ContextKeys.PipelineName, out var pn) && pn is not null
             ? pn : string.Empty;
-        var verification = context.Pipeline.TryGet<MasterVerification>(ContextKeys.MasterVerification, out var mv)
-            ? mv : null;
-        var realChanges = context.Changes.Count(c => !RunRecordPaths.IsRunRecordPath(c.Path.ToString()));
-        // p0341c: same ledger + diff cross-check the git-authoritative keystone applies, so
-        // result.md's early verdict stays consistent with CommitAndPR's final gate.
-        var ledger = context.Pipeline.TryGet<ProgressLedger>(ContextKeys.ProgressLedger, out var lg) ? lg : null;
-        var changedPaths = context.Changes.Select(c => c.Path.ToString()).ToList();
-        var verdict = RunOutcomeKeystone.Evaluate(
-            PipelinePresets.ExpectsCodeChanges(pipelineName),
-            PipelinePresets.ExpectsGreenTests(pipelineName),
-            gitCommittedChange: realChanges > 0,
-            recordedChange: realChanges > 0,
-            verification,
-            RatifiedCriteria(context.Pipeline),
-            ledger,
-            changedPaths);
+        // p0421: the same ONE gate CommitAndPR applies, reading the same accounts —
+        // result.md and the pull request cannot disagree about whether a run delivered
+        // because they no longer answer the question separately.
+        var verdict = RunDeliveryGate.Evaluate(
+            Specs.RunAccountLedger.Current(context.Pipeline),
+            Specs.AcceptanceCriteria.For(context.Pipeline).Count);
         return verdict.Satisfied ? null : verdict.FailureReason;
     }
 

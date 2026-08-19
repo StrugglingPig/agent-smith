@@ -122,7 +122,10 @@ public sealed class ConfigStudioApiSmokeTests
                 .And.Contain("\"connectionTypes\"").And.Contain("\"orgLabel\":\"owner\"")
                 .And.Contain("\"agentProviders\"").And.Contain("\"azure_openai\"")
                 .And.Contain("\"resolutionStrategies\"").And.Contain("\"area_path\"")
-                .And.Contain("\"pipelines\"").And.Contain("\"fix-bug\"");
+                .And.Contain("\"pipelines\"").And.Contain("\"code\"");
+            // p0393: the Studio OFFERS the current presets. A retired name still
+            // validates in an existing configuration, but must never be presented
+            // as a choice — that is the difference between IsAcceptedName and Names.
 
             // POST a repo (camelCase body via the same serializer the dashboard uses), read it back.
             var post = await http.PostAsJsonAsync("/api/config/repos",
@@ -321,6 +324,54 @@ public sealed class ConfigStudioApiSmokeTests
         }
     }
 
+    [Fact]
+    public async Task ConfigStudioApi_ValidateDraft_ReportsWhatTheServerWouldReport()
+    {
+        // p0392: the wire seam behind "the Studio asks the same validation the server uses".
+        // The rule is ClarificationParkStatusRule — the one that refused a boot on
+        // 2026-07-31 — reached over HTTP with a draft that was never saved.
+        var path = Path.Combine(Path.GetTempPath(), $"agentsmith-smoke-validate-{Guid.NewGuid():N}.yml");
+        File.WriteAllText(path, Yaml);
+        try
+        {
+            await using var app = await StartAppAsync(path);
+            using var http = NewClient(app);
+
+            // The seeded tracker has no needs_clarification_status, and `code` can park.
+            var parking = await http.PostAsJsonAsync("/api/config/projects/validate",
+                new ProjectEntity("draft", "claude-default", "test-ado", ["test-repo"], "code", ["code"],
+                    new ProjectResolution("tag", "draft")));
+            parking.StatusCode.Should().Be(HttpStatusCode.OK);
+            var findings = await parking.Content.ReadFromJsonAsync<List<AgentSmith.Server.Models.StartupFindingView>>();
+            findings.Should().Contain(f =>
+                f!.Field == "needs_clarification_status" && f.Severity == "blocking" && f.Project == "draft");
+
+            // A scan-only project cannot park, so demanding the field would be noise.
+            var scan = await http.PostAsJsonAsync("/api/config/projects/validate",
+                new ProjectEntity("draft", "claude-default", "test-ado", ["test-repo"],
+                    "security-scan", ["security-scan"], new ProjectResolution("tag", "draft")));
+            (await scan.Content.ReadFromJsonAsync<List<AgentSmith.Server.Models.StartupFindingView>>())
+                .Should().NotContain(f => f!.Field == "needs_clarification_status");
+
+            // The tracker route reports the descriptor's requiredness instead of refusing.
+            var tracker = await http.PostAsJsonAsync("/api/config/trackers/validate",
+                new TrackerEntity("draft", "azure_devops", AuthSecret: null));
+            var trackerFindings =
+                await tracker.Content.ReadFromJsonAsync<List<AgentSmith.Server.Models.StartupFindingView>>();
+            trackerFindings.Should().ContainSingle().Which.Reason
+                .Should().Contain("organization").And.Contain("authSecret");
+
+            // Nothing the draft carried leaked into the installation's live findings.
+            app.Services.GetService<IStartupFindings>()?.All.Should().BeNullOrEmpty();
+
+            await app.StopAsync();
+        }
+        finally
+        {
+            DeleteConfigAndDb(path);
+        }
+    }
+
     private static StringContent JsonBody(string json) => new(json, Encoding.UTF8, "application/json");
 
     private static StringContent YamlBody(string yaml) => new(yaml, Encoding.UTF8, "text/yaml");
@@ -356,6 +407,9 @@ public sealed class ConfigStudioApiSmokeTests
         builder.Services.AddScoped<ConfigImportRepository>();
         builder.Services.AddSingleton<ConfigDocumentAssembler>();
         builder.Services.AddSingleton<IConfigDocumentStore, EfConfigDocumentStore>();
+        builder.Services.AddSingleton<AgentSmith.Infrastructure.Core.Services.Configuration.Studio.ConfigDocJson>();
+        builder.Services.AddSingleton<AgentSmith.Infrastructure.Core.Services.Configuration.RawConfigYaml>();
+        builder.Services.AddSingleton<AgentSmith.Infrastructure.Core.Services.Configuration.Studio.ConfigYamlExporter>();
         builder.Services.AddSingleton<IConfigStore, DbConfigStore>();
         // p0353: the write endpoints emit a config-reload signal; mirror the server's
         // CLI/no-Redis baseline so [FromServices] resolves.
@@ -363,10 +417,18 @@ public sealed class ConfigStudioApiSmokeTests
         builder.Services.AddSingleton<ISystemEventPublisher, NoOpSystemEventPublisher>();
         // p0345c: the capabilities endpoint reads the REAL registered chat-client
         // builders; the repo-picker endpoint reads the REAL disk snapshot store.
+        // p0416: the external-worker builder is constructed with the rest; the run
+        // context it takes is registered by every production host.
+        builder.Services.AddSingleton<AgentSmith.Contracts.Events.IRunContextAccessor,
+            AgentSmith.Application.Services.Events.AsyncLocalRunContextAccessor>();
         builder.Services.AddAgentProviders();
         builder.Services.AddSingleton<IAgentSmithPaths>(
             new TempPaths(cacheRoot ?? Path.Combine(Path.GetTempPath(), $"agentsmith-cache-{Guid.NewGuid():N}")));
         builder.Services.AddSingleton<IConnectionRepoSnapshotStore, DiskConnectionRepoSnapshotStore>();
+        // p0392: the draft-validation endpoints run the server's own rule objects.
+        builder.Services.AddSingleton<EffectiveTriggerBuilder>();
+        builder.Services.AddSingleton<ProjectConfigNormalizer>();
+        builder.Services.AddSingleton<ConfigDraftRules>();
 
         var app = builder.Build();
         // SQL Server DBs are pre-migrated (the SqlServer migrations assembly is not
@@ -385,7 +447,7 @@ public sealed class ConfigStudioApiSmokeTests
             scope.ServiceProvider.GetRequiredService<AgentSmithDbContext>().Database.Migrate();
         if (!seed) return;
         var assembler = app.Services.GetRequiredService<ConfigDocumentAssembler>();
-        var raw = RawConfigYaml.Deserialize(File.ReadAllText(configPath));
+        var raw = new RawConfigYaml().Deserialize(File.ReadAllText(configPath));
         var writes = assembler.Decompose(raw)
             .Select(d => new ConfigDocWrite(d.Type, d.Id, d.Doc, null, d.Edges, "smoke"))
             .ToList();

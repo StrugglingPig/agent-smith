@@ -1,3 +1,5 @@
+using AgentSmith.Infrastructure.Services.RateLimiting;
+using AgentSmith.Application.Services.Metrics;
 using AgentSmith.Application.Models;
 using AgentSmith.Application.Services;
 using AgentSmith.Application.Services.Events;
@@ -45,7 +47,6 @@ public sealed class EventSequenceCompletenessTests
     [InlineData(ProducerId.ToolDecorator, EventType.ToolCall, EventType.ToolResult)]
     [InlineData(ProducerId.DecisionLogger, EventType.DecisionLogged)]
     [InlineData(ProducerId.GateHandlers, EventType.GateChecked)]
-    [InlineData(ProducerId.TriageOutputProducer, EventType.TriageRoute)]
     public async Task DropOneProducer_RemainingTypesPresent(ProducerId dropped, params EventType[] missingTypes)
     {
         var recorder = new RecordingEventPublisher();
@@ -76,7 +77,6 @@ public sealed class EventSequenceCompletenessTests
         EventType.LlmCallStarted, EventType.LlmCallFinished,
         EventType.ToolCall, EventType.ToolResult,
         EventType.DecisionLogged, EventType.GateChecked,
-        EventType.TriageRoute
     };
 
     private static Task ExerciseProducerAsync(ProducerId producer, IEventPublisher publisher) =>
@@ -90,7 +90,6 @@ public sealed class EventSequenceCompletenessTests
             ProducerId.ToolDecorator => ExerciseToolDecorator(publisher),
             ProducerId.DecisionLogger => ExerciseDecisionLogger(publisher),
             ProducerId.GateHandlers => ExerciseGateHandlers(publisher),
-            ProducerId.TriageOutputProducer => ExerciseTriageProducer(publisher),
             _ => Task.CompletedTask
         };
 
@@ -130,7 +129,7 @@ public sealed class EventSequenceCompletenessTests
     {
         var client = new EventPublishingChatClient(
             new StubChat(), publisher, new ScopedRunContext(RunId),
-            new ModelPricingResolver());
+            new LlmCallCostCalculator(new ModelPricingResolver()), new ThrottleWaitReporter());
         await client.GetResponseAsync(
             new[] { new ChatMessage(ChatRole.User, "hello") }, options: null, CancellationToken.None);
     }
@@ -146,42 +145,19 @@ public sealed class EventSequenceCompletenessTests
 
     private static async Task ExerciseDecisionLogger(IEventPublisher publisher)
     {
+        var runContext = new ScopedRunContext(RunId);
         var logger = new InMemoryDecisionLogger(
-            publisher, new ScopedRunContext(RunId),
+            publisher, runContext, new DecisionEventMirror(publisher, runContext),
             NullLogger<InMemoryDecisionLogger>.Instance);
         await logger.LogAsync(null, DecisionCategory.Architecture, "chose X over Y");
     }
 
     private static async Task ExerciseGateHandlers(IEventPublisher publisher)
     {
-        var handler = new EmptyPlanCheckHandler(publisher, NullLogger<EmptyPlanCheckHandler>.Instance);
+        var handler = new EmptyPlanCheckHandler(publisher, new AgentSmithMetrics(), NullLogger<EmptyPlanCheckHandler>.Instance);
         var pipeline = new PipelineContext();
         pipeline.Set(ContextKeys.RunId, RunId);
         await handler.ExecuteAsync(new EmptyPlanCheckContext(pipeline), CancellationToken.None);
-    }
-
-    private static async Task ExerciseTriageProducer(IEventPublisher publisher)
-    {
-        var parser = new ActivationExpressionParser(new ActivationExpressionTokenizer());
-        var scorer = new ActivationSpecificityScorer(parser, NullLogger<ActivationSpecificityScorer>.Instance);
-        var producer = new TriageOutputProducer(
-            new DeterministicTriageSelector(scorer),
-            new TriageLabelOverrideApplier(),
-            new ActivationSkillFilter(parser, new ActivationEvaluator(),
-                NullLogger<ActivationSkillFilter>.Instance),
-            new PhaseSpecificityTrimmer(scorer, NullLogger<PhaseSpecificityTrimmer>.Instance),
-            RunStateConceptsTestFactory.Default,
-            new LoopLimitsConfig { MaxSkillsPerPhase = 10 },
-            publisher,
-            NullLogger<TriageOutputProducer>.Instance);
-        var pipeline = new PipelineContext();
-        pipeline.Set(ContextKeys.RunId, RunId);
-        pipeline.Set(ContextKeys.AvailableRoles,
-            (IReadOnlyList<RoleSkillDefinition>)new[]
-            {
-                new RoleSkillDefinition { Name = "planner", Description = "planner", Role = "producer" }
-            });
-        await producer.ProduceAsync(pipeline, CancellationToken.None);
     }
 
     private sealed class ScopedRunContext(string runId) : IRunContextAccessor
@@ -189,6 +165,8 @@ public sealed class EventSequenceCompletenessTests
         public string? CurrentRunId => runId;
         public CallScope? CurrentCallScope => null;
         public IDisposable BeginScope(string id) => new NoOpScope();
+        public int? CurrentStepIndex => null;
+        public IDisposable BeginStepScope(int stepIndex) => new NoOpScope();
         public IDisposable BeginCallScope(string role, string phase, string? repoName = null) => new NoOpScope();
         private sealed class NoOpScope : IDisposable { public void Dispose() { } }
     }

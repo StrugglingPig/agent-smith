@@ -1,5 +1,6 @@
 using AgentSmith.Application.Models;
 using AgentSmith.Application.Services.Lifecycle;
+using AgentSmith.Application.Services.Specs;
 using AgentSmith.Contracts.Commands;
 using AgentSmith.Contracts.Events;
 using AgentSmith.Contracts.Expectations;
@@ -7,6 +8,7 @@ using AgentSmith.Contracts.Models.Configuration;
 using AgentSmith.Contracts.Providers;
 using AgentSmith.Contracts.Sandbox;
 using AgentSmith.Contracts.Services;
+using AgentSmith.Contracts.Specs;
 using AgentSmith.Domain.Entities;
 using AgentSmith.Domain.Models;
 using AgentSmith.Sandbox.Wire;
@@ -30,6 +32,9 @@ public sealed class CommitAndPRHandler(
     SandboxGitOperations gitOps,
     ISecretPatternScanner secretScanner,
     IEventPublisher events,
+    TicketLifecycle ticketLifecycle,
+    SandboxTargets sandboxTargets,
+    Specs.PhaseAccounting accounting,
     ILogger<CommitAndPRHandler> logger)
     : ICommandHandler<CommitAndPRContext>
 {
@@ -59,7 +64,7 @@ public sealed class CommitAndPRHandler(
         var bodies = new Dictionary<string, string>(context.Configs.Count, StringComparer.Ordinal);
         foreach (var repo in context.Configs)
         {
-            var matches = SandboxTargets.SandboxesForRepo(context.Pipeline, repo);
+            var matches = sandboxTargets.SandboxesForRepo(context.Pipeline, repo);
             if (matches.Count == 0)
             {
                 opened.Add(new OpenedPullRequest(repo.Name, Url: null, OpenStatus.Failed, "no sandbox available"));
@@ -101,32 +106,24 @@ public sealed class CommitAndPRHandler(
         var verification = context.Pipeline.TryGet<MasterVerification>(ContextKeys.MasterVerification, out var mv)
             ? mv : null;
         var realCodeChanges = context.Changes.Count(c => !RunRecordPaths.IsRunRecordPath(c.Path.ToString()));
-        var criteria = context.Pipeline.TryGet<RatifiedExpectation>(ContextKeys.RunExpectation, out var exp)
-            && exp is not null ? exp.Draft.Expected : Array.Empty<string>();
-        // p0341c: the ledger + the run's changed paths let the keystone downgrade a
-        // truncated run that self-reported Met over still-open steps. Empty ledger /
-        // no-contract runs are unchanged (the cross-check falls through to p0340).
-        var ledger = context.Pipeline.TryGet<Contracts.Progress.ProgressLedger>(
-            ContextKeys.ProgressLedger, out var lg) ? lg : null;
-        var changedPaths = context.Changes.Select(c => c.Path.ToString()).ToList();
-        // p0384: per-repo staged truth + the classifier's must-change subset let the
-        // keystone fail a run that skipped an expected-change repo, naming the repo.
-        // Absent expected set => anyCode semantics, unchanged.
-        var perRepoCode = stagedRepos.ToDictionary(
-            s => s.Repo.Name ?? string.Empty, s => s.HasCode, StringComparer.OrdinalIgnoreCase);
-        var expectedChangeRepos = context.Pipeline.TryGet<IReadOnlyList<string>>(
-            ContextKeys.ExpectedChangeRepos, out var ecr) ? ecr : null;
-        var keystone = RunOutcomeKeystone.Evaluate(
-            PipelinePresets.ExpectsCodeChanges(pipelineName),
-            PipelinePresets.ExpectsGreenTests(pipelineName),
-            gitCommittedChange: anyCode,
-            recordedChange: realCodeChanges > 0,
-            verification,
-            criteria,
-            ledger,
-            changedPaths,
-            perRepoCommittedChange: perRepoCode,
-            expectedChangeRepos: expectedChangeRepos);
+        // p0393a: the acceptance contract is the current phase's done-list, falling back to
+        // a ratified expectation for pipelines that still negotiate one.
+        var criteria = Specs.AcceptanceCriteria.For(context.Pipeline);
+        // p0421: ONE gate, reading what every phase accounted for against the branch.
+        // Its predecessor asked whether THIS run had committed code and needed six
+        // signals to teach that question its exceptions — a resumed branch carrying a
+        // complete delivery still came out FAILED.
+        var accounts = await accounting.TakeOrReuseAsync(
+            context.Pipeline, criteria, cancellationToken);
+        var keystone = RunDeliveryGate.Evaluate(accounts, criteria.Count);
+
+        // p0393a: a sequence that stopped mid-way leaves a HALF-MIGRATED repository — some
+        // phases applied, others not. That state must be unmergeable BY CONSTRUCTION, not
+        // merely accompanied by a red check somebody can override, because it is the one
+        // failure that looks finished.
+        var progress = context.Pipeline.TryGet<SpecSequenceProgress>(
+            ContextKeys.SpecSequenceProgress, out var seq) ? seq : null;
+        var halfMigrated = progress?.IsPartial == true;
 
         foreach (var (repo, sandbox, hasCode) in stagedRepos)
         {
@@ -142,7 +139,8 @@ public sealed class CommitAndPRHandler(
             else
             {
                 var (result, body) = await OpenOneAsync(
-                    context, sandbox, repo, isDraft: !keystone.Satisfied, cancellationToken);
+                    context, sandbox, repo,
+                    isDraft: !keystone.Satisfied || halfMigrated, progress, cancellationToken);
                 outcome = result;
                 if (body is not null) bodies[repo.Name] = body;
             }
@@ -221,7 +219,8 @@ public sealed class CommitAndPRHandler(
     }
 
     private async Task<(OpenedPullRequest Result, string? Body)> OpenOneAsync(
-        CommitAndPRContext context, ISandbox sandbox, RepoConnection repo, bool isDraft, CancellationToken ct)
+        CommitAndPRContext context, ISandbox sandbox, RepoConnection repo, bool isDraft,
+        SpecSequenceProgress? progress, CancellationToken ct)
     {
         var branch = context.Repository.CurrentBranch.Value;
         var message = $"fix: {context.Ticket.Title} (#{context.Ticket.Id})";
@@ -293,16 +292,31 @@ public sealed class CommitAndPRHandler(
         var redBanner = isDraft
             ? "> ⚠️ **Verification red** — build/tests did not pass. Draft for review, do not merge as-is.\n\n"
             : string.Empty;
-        // p0328: the ratified expectation renders as a reviewer checklist — the
-        // PR's acceptance contract; headless runs show the 'unratified' stamp.
+        // p0328/p0393a: the acceptance contract renders as a reviewer checklist. p0393a
+        // adds the per-phase table and the discarded list — for a stopped sequence the
+        // table is the statement that the repository is half migrated, spelled out phase
+        // by phase instead of implied by a red check.
+        // p0429a: and the account the gate judged the run by, itemised — a reviewer who
+        // reads only the PR still reads what went unanswered instead of inferring it.
         var body = $"{redBanner}{context.Ticket.Description}"
-            + $"{ExpectationPrBodySection.Build(context.Pipeline)}\n\n{SiblingMarker}";
+            + $"{ExpectationPrBodySection.Build(context.Pipeline)}"
+            + $"{SpecPrBodySection.Build(context.Pipeline, progress)}"
+            + $"{RunAccountSection.Build(context.Pipeline)}\n\n{SiblingMarker}";
         try
         {
             var provider = sourceFactory.Create(repo);
+            var branchRepo = new Repository(context.Repository.CurrentBranch, repo.Url ?? string.Empty);
+            // p0390: FIND-or-create. A run now opens its draft PR early, at the work-spec
+            // commit, so a reviewer has something to edit while the run is still working.
+            // An unconditional second create on the same branch throws into the catch
+            // below and reports the whole PR step Failed; reusing it and refreshing the
+            // body carries the run's outcome onto the PR that already exists.
+            var existing = await provider.FindOpenPullRequestAsync(branchRepo, ct);
+            if (existing is not null)
+                return (await RefreshAsync(provider, repo.Name, existing, body, isDraft, ct), body);
             var prUrl = await provider.CreatePullRequestAsync(
-                new Repository(context.Repository.CurrentBranch, repo.Url ?? string.Empty),
-                context.Ticket.Title, body, ct, linkedTicketId: context.Ticket.Id, isDraft: isDraft);
+                branchRepo, context.Ticket.Title, body, ct,
+                linkedTicketId: context.Ticket.Id, isDraft: isDraft);
             logger.LogInformation("{Repo}: PR opened {Url}", repo.Name, prUrl);
             return (new OpenedPullRequest(repo.Name, prUrl, OpenStatus.Opened), body);
         }
@@ -311,6 +325,26 @@ public sealed class CommitAndPRHandler(
             logger.LogError(ex, "{Repo}: PR open failed", repo.Name);
             return (new OpenedPullRequest(repo.Name, Url: null, OpenStatus.Failed, Truncate(ex.Message)), null);
         }
+    }
+
+    // p0390: the PR already exists (opened at the work-spec commit, or by an earlier
+    // run on this ticket branch). Refresh its body so the run's outcome — the red
+    // banner, the acceptance checklist, the sibling marker — reaches the reviewer.
+    // A failed body update is NOT a failed PR: the PR is open and the work is on it.
+    private async Task<OpenedPullRequest> RefreshAsync(
+        ISourceProvider provider, string repoName, string prUrl, string body, bool isDraft,
+        CancellationToken ct)
+    {
+        var updated = await provider.UpdatePullRequestBodyAsync(prUrl, body, ct);
+        // p0393a: the PR was opened as a DRAFT at the spec commit, before any phase was
+        // verified. Only a complete, green run takes it out of draft — a stopped sequence
+        // stays unmergeable by construction, which is the whole point of opening it early.
+        var ready = !isDraft && await provider.MarkPullRequestReadyAsync(prUrl, ct);
+        logger.LogInformation(
+            "{Repo}: reusing the PR opened earlier on this branch {Url} "
+            + "(body updated: {Updated}, ready for review: {Ready})",
+            repoName, prUrl, updated, ready);
+        return new OpenedPullRequest(repoName, prUrl, OpenStatus.Opened);
     }
 
     private static bool LooksLikeEmptyCommit(Exception ex) =>
@@ -347,11 +381,12 @@ public sealed class CommitAndPRHandler(
 
             ### Changes
             {changes}
+            {RunAccountSection.Build(context.Pipeline)}
 
             This ticket was automatically processed by Agent Smith.
             """;
         context.Pipeline.TryGet<string>(ContextKeys.DoneStatus, out var doneStatus);
-        return TicketLifecycle.FinalizeAsync(
+        return ticketLifecycle.FinalizeAsync(
             ticketFactory, context.TrackerConnection, context.Ticket.Id,
             doneStatus, summary, logger, ct);
     }

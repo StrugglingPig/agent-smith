@@ -14,8 +14,8 @@ namespace AgentSmith.Tests.Services;
 /// <summary>
 /// p0147e: per-service unit tests for IPipelineStepRunner. Covers the
 /// step-runner's contract in isolation from the orchestrator: exception
-/// envelope, OCE propagation, progress reporter wiring, batch-vs-single
-/// dispatch, and the static PeelBatch peeler.
+/// envelope, OCE propagation and progress reporter wiring. p0312d: single
+/// dispatch is the only dispatch — the batch peeler is gone.
 /// </summary>
 public sealed class PipelineStepRunnerTests
 {
@@ -35,8 +35,8 @@ public sealed class PipelineStepRunnerTests
             _factoryMock.Object,
             _progressMock.Object,
             dataFlowReadGate,
-            new AgentSmith.Application.Services.SkillRounds.SkillRoundBufferDispatcher(),
             AgentSmith.Tests.TestHelpers.EventTestStubs.NoOp,
+            AgentSmith.Tests.TestHelpers.EventTestStubs.RunContext,
             NullLogger<PipelineStepRunner>.Instance);
     }
 
@@ -124,17 +124,4 @@ public sealed class PipelineStepRunnerTests
             1, 1, It.IsAny<PipelineCommand>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    [Fact]
-    public void PeelBatch_PublicSurface_ReturnsSameAsInternalPeeler()
-    {
-        var list = new LinkedList<PipelineCommand>(new[]
-        {
-            PipelineCommand.SkillRound(CommandNames.SkillRound, "a", 1),
-            PipelineCommand.SkillRound(CommandNames.SkillRound, "b", 1)
-        });
-
-        var batch = _sut.PeelBatch(list.First!, maxConcurrent: 4);
-
-        batch.Should().HaveCount(2);
-    }
 }

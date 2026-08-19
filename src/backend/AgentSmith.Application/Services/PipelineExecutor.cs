@@ -21,6 +21,9 @@ public sealed class PipelineExecutor(
     IPipelineErrorHandler errorHandler,
     IPipelineLifecycleCoordinator lifecycleCoordinator,
     IRunCancellationRegistry cancellationRegistry,
+    PipelineExecutorPolicy parkPolicy,
+    Pipeline.PipelineFinalizerTail finalizerTail,
+    Pipeline.PlannedStepsAnnouncer plannedSteps,
     ILogger<PipelineExecutor> logger) : IPipelineExecutor
 {
     private const int MaxCommandExecutions = 100;
@@ -84,9 +87,11 @@ public sealed class PipelineExecutor(
         CancellationToken ct)
     {
         var commands = new LinkedList<PipelineCommand>(commandList);
-        var maxConcurrent = PipelineExecutorPolicy.ResolveMaxConcurrent(projectConfig, context);
         var current = commands.First;
         var executionCount = startExecutionCount;
+        // p0405: the last sequence announced, so the run detail can say what is
+        // still coming. Re-announced only when a handler splices into the list.
+        string? announced = null;
 
         while (current is not null)
         {
@@ -95,12 +100,13 @@ public sealed class PipelineExecutor(
             // serialize exactly the remaining work, starting with itself.
             context.Set(ContextKeys.RemainingCommands, RemainingFrom(current));
             context.Set(ContextKeys.PipelineExecutionCount, executionCount);
+            announced = await plannedSteps.AnnounceChangedAsync(
+                context, startExecutionCount + 1, commands, announced, ct);
 
-            var batch = stepRunner.PeelBatch(current, maxConcurrent);
-            if (batch.Any(n => sandbox.IsSandboxRequiring(n.Value.Name)))
+            if (sandbox.IsSandboxRequiring(current.Value.Name))
                 await sandbox.EnsureSandboxesAsync(projectConfig, context, ct);
 
-            if (executionCount - startExecutionCount + batch.Count > MaxCommandExecutions)
+            if (executionCount - startExecutionCount + 1 > MaxCommandExecutions)
             {
                 lifecycle.MarkFailed();
                 return CommandResult.Fail($"Pipeline exceeded maximum of {MaxCommandExecutions} command executions. " +
@@ -110,9 +116,8 @@ public sealed class PipelineExecutor(
             StepExecutionResult stepResult;
             try
             {
-                stepResult = batch.Count == 1
-                    ? await stepRunner.RunSingleAsync(current, commands, projectConfig, context, ++executionCount, ct)
-                    : await stepRunner.RunBatchAsync(batch, commands, projectConfig, context, executionCount + 1, ct);
+                stepResult = await stepRunner.RunSingleAsync(
+                    current, commands, projectConfig, context, ++executionCount, ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -137,12 +142,11 @@ public sealed class PipelineExecutor(
                     context.Set(ContextKeys.FailureReason,
                         "Run was cancelled by a safety mechanism (wall-time or a vanished "
                         + "sandbox) — partial work preserved.");
-                    await RunFinalizerTailAsync(
-                        batch[^1], commands, projectConfig, context, executionCount, CancellationToken.None);
+                    await finalizerTail.RunAsync(
+                        current, commands, projectConfig, context, executionCount, CancellationToken.None);
                 }
                 throw;
             }
-            if (batch.Count > 1) executionCount += batch.Count;
 
             if (!stepResult.Result.IsSuccess)
             {
@@ -158,13 +162,13 @@ public sealed class PipelineExecutor(
                 // Handler.DescribeMasterFailure check `is OperationCanceledException`
                 // on the exception chain) — no message-text parsing here.
                 context.Set(ContextKeys.FailureReason, stepResult.Result.Message ?? "unknown");
-                await RunFinalizerTailAsync(batch[^1], commands, projectConfig, context, executionCount, ct);
+                await finalizerTail.RunAsync(current, commands, projectConfig, context, executionCount, ct);
                 await errorHandler.HandleStepFailureAsync(
                     commandList.Select(c => c.Name).ToList(), projectConfig, context, lifecycle, stepResult.Result, ct);
                 return stepResult.Result;
             }
-            if (PipelineExecutorPolicy.TryGetParkedReason(context, logger, out var parked)) return CommandResult.Ok(parked);
-            current = stepResult.AdvanceTo ?? batch[^1].Next;
+            if (parkPolicy.TryGetParkedReason(context, out var parked)) return CommandResult.Ok(parked);
+            current = stepResult.AdvanceTo ?? current.Next;
         }
 
         logger.LogInformation("Pipeline completed successfully");
@@ -180,34 +184,4 @@ public sealed class PipelineExecutor(
         return remaining;
     }
 
-    // p0237: commands that must run even when an earlier step failed, so a
-    // failed/cancelled run still produces a record. PersistWorkBranch is NOT
-    // here — the error handler owns the best-effort WIP push (its own guard for
-    // read-only pipelines). These run AFTER the failed step, in pipeline order.
-    private static readonly HashSet<string> FinalizerCommands = new(StringComparer.Ordinal)
-    {
-        CommandNames.WriteRunResult,
-        CommandNames.CommitAndPR,
-        CommandNames.PrCrossLink,
-    };
-
-    private async Task RunFinalizerTailAsync(
-        LinkedListNode<PipelineCommand> failedNode, LinkedList<PipelineCommand> commands,
-        ResolvedProject projectConfig, PipelineContext context, int executionCount, CancellationToken ct)
-    {
-        for (var node = failedNode.Next; node is not null; node = node.Next)
-        {
-            if (!FinalizerCommands.Contains(node.Value.Name)) continue;
-            try
-            {
-                // Best-effort: a finalizer that throws/fails must not stop the
-                // others — a failed run still records as much as it can.
-                await stepRunner.RunSingleAsync(node, commands, projectConfig, context, ++executionCount, ct);
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "Finalizer {Command} threw while finalizing a failed run", node.Value.Name);
-            }
-        }
-    }
 }

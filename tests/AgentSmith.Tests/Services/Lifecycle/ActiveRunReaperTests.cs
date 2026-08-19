@@ -114,6 +114,14 @@ public sealed class ActiveRunReaperTests
         await loop;
     }
 
+    // p0423b: the budget is a HANG-DETECTOR, not a claim about speed. Progress is
+    // measured in loop iterations (see WaitForIterationsAsync) precisely so this test
+    // does not assert wall-clock timing — but the poll itself still needs to be
+    // scheduled, and on a two-core CI runner a burst of migration-applying test classes
+    // starves async continuations for seconds at a time. What is asserted is that the loop
+    // progresses at all rather than deadlocking.
+    // p0432: back down from 120s. The burst is gone — the suite migrates ONCE and hands out
+    // copies — so the guard can fail fast on a real deadlock again.
     private static async Task WaitForAsync(Func<bool> condition)
     {
         var deadline = DateTime.UtcNow.AddSeconds(30);

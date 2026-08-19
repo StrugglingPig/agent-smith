@@ -1,18 +1,22 @@
 "use client";
 
-import { use, useEffect, useMemo, useState } from "react";
+import { use, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useJobsHub } from "@/hooks/useJobsHub";
 import { useRunEvents } from "@/hooks/useRunEvents";
 import { useRunDetailSnapshot } from "@/hooks/useRunDetailSnapshot";
 import { useRunExecutionTree } from "@/hooks/useRunExecutionTree";
+import { useRunSteps } from "@/hooks/useRunSteps";
+import { useRunStepEvents } from "@/hooks/useRunStepEvents";
 import { useRailSelection, type RailSelectable } from "@/hooks/useRailSelection";
 import { RunDetailHeader, statusSpill } from "@/components/jobs/RunDetailHeader";
 import { PendingQuestionCard } from "@/components/jobs/PendingQuestionCard";
 import { RunSideRail } from "@/components/jobs/RunSideRail";
 import { RunStory } from "@/components/jobs/story/RunStory";
 import { NavRail, type OverviewRailItem } from "@/components/execution/NavRail";
+import { PaneResizeHandle } from "@/components/execution/PaneResizeHandle";
 import { DetailPane } from "@/components/execution/DetailPane";
+import { ExecutionNode } from "@/components/execution/ExecutionNode";
 import { ArchitectureDetail } from "@/components/execution/ArchitectureDetail";
 import { AnalyzeMarkdownSection } from "@/components/execution/AnalyzeMarkdownSection";
 import { PlanDetail } from "@/components/execution/PlanDetail";
@@ -20,7 +24,11 @@ import { ResultDetail } from "@/components/execution/ResultDetail";
 import type { ExecutionNodeProps } from "@/components/execution/ExecutionNode";
 import type { NodeStatus } from "@/components/execution/TimingGutter";
 import { deriveRunRepoNames } from "@/lib/runRepoNames";
+import { isRunLive } from "@/lib/runLiveness";
 import { formatRunSummary } from "@/lib/formatRunSummary";
+import { stepIndexOf, toRailNodes } from "@/lib/runStepRail";
+import { usePersistedPaneWidth } from "@/hooks/usePersistedPaneWidth";
+import { useViewportWidth } from "@/hooks/useViewportWidth";
 import { cn } from "@/lib/utils";
 import type { RunSnapshot } from "@/types/hub-events";
 
@@ -35,6 +43,23 @@ import type { RunSnapshot } from "@/types/hub-events";
 const ARCH_ID = "arch";
 const PLAN_ID = "plan";
 const RESULT_ID = "result";
+
+// p0395: the trace drawer's persisted dimensions — the drawer's own width and
+// the master/detail split. Stored per browser, applied as CSS custom properties
+// so the stylesheet defaults stay the single fallback. p0395a: persisted as
+// FRACTIONS (drawer/viewport, rail/drawer) so the panes scale with the window;
+// the defaults below mirror the stylesheet (`min(1320px, 96vw)` drawer width).
+const TRACE_DRAWER_WIDTH_KEY = "agentsmith.trace-drawer.width";
+const TRACE_RAIL_WIDTH_KEY = "agentsmith.trace-drawer.rail";
+const DRAWER_MIN = 560;
+const DRAWER_MAX_SHARE = 0.96;
+const DRAWER_DEFAULT = 1320;
+const RAIL_MIN = 220;
+const RAIL_MAX = 560;
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
 // p0247: the Analyze-codebase step's canonical display label (backend
 // CommandDisplayNames[AnalyzeCode]).
 const ANALYZE_STEP_LABEL = "Analyze codebase";
@@ -54,6 +79,28 @@ function RunDetail({ runId }: { runId: string }) {
   const events = useRunEvents(runId);
   const [traceOpen, setTraceOpen] = useState(false);
   const [dialogueOpen, setDialogueOpen] = useState(false);
+  // p0395: the trace drawer resizes on two axes — its own width (left-edge
+  // handle) and the master/detail split (handle on the rail's edge) — and both
+  // survive a reload. p0395a: both persist as fractions of their basis (the
+  // viewport, resp. the drawer), so resizing the window rescales both panes.
+  const viewportWidth = useViewportWidth();
+  const drawerMax =
+    viewportWidth == null ? DRAWER_DEFAULT : Math.round(viewportWidth * DRAWER_MAX_SHARE);
+  const [drawerWidth, setDrawerWidth] = usePersistedPaneWidth(
+    TRACE_DRAWER_WIDTH_KEY,
+    viewportWidth,
+    DRAWER_MIN,
+    drawerMax,
+  );
+  const effectiveDrawerWidth =
+    viewportWidth == null ? null : drawerWidth ?? Math.min(DRAWER_DEFAULT, drawerMax);
+  const [railWidth, setRailWidth] = usePersistedPaneWidth(
+    TRACE_RAIL_WIDTH_KEY,
+    effectiveDrawerWidth,
+    RAIL_MIN,
+    RAIL_MAX,
+  );
+  const traceGridRef = useRef<HTMLDivElement | null>(null);
 
   const listSnapshot = useMemo(() => {
     if (!overview) return null;
@@ -70,9 +117,12 @@ function RunDetail({ runId }: { runId: string }) {
     [snapshot, events],
   );
 
-  const { nodes } = useRunExecutionTree(events, snapshot, runId);
+  // p0388b: the rail comes from the RunStep projection, not from folding the
+  // event log — so it is complete on first paint and after a reload, no matter
+  // how far the run has outgrown the client's live event window.
+  const steps = useRunSteps(runId, snapshot);
+  const nodes = useMemo(() => toRailNodes(steps), [steps]);
   const resultStatus = mapResultStatus(snapshot?.status);
-  const flat = useMemo(() => flattenNodes(nodes), [nodes]);
 
   const overviewItems: OverviewRailItem[] = [
     { id: ARCH_ID, label: "Architecture", status: "ok" },
@@ -80,10 +130,7 @@ function RunDetail({ runId }: { runId: string }) {
     { id: RESULT_ID, label: "Result", status: resultStatus },
   ];
   const selectable: RailSelectable[] = [
-    ...nodes.flatMap((n) => [
-      { id: n.id, status: n.status },
-      ...(n.children ?? []).map((c) => ({ id: c.id, status: c.status })),
-    ]),
+    ...nodes.map((n) => ({ id: n.id, status: n.status })),
     ...overviewItems,
   ];
   const selection = useRailSelection(selectable);
@@ -188,7 +235,20 @@ function RunDetail({ runId }: { runId: string }) {
         className={cn("drawer wide", traceOpen && "open")}
         aria-label="Full pipeline"
         data-testid="trace-drawer"
+        style={
+          drawerWidth != null
+            ? ({ "--trace-drawer-w": `${drawerWidth}px` } as React.CSSProperties)
+            : undefined
+        }
       >
+        <PaneResizeHandle
+          ariaLabel="Resize the pipeline drawer"
+          testId="trace-drawer-resize"
+          className="drawer-edge-handle"
+          onResize={(clientX) =>
+            setDrawerWidth(clamp(window.innerWidth - clientX, DRAWER_MIN, drawerMax))
+          }
+        />
         <div className="drawer-h">
           <h3>
             Full pipeline
@@ -204,12 +264,31 @@ function RunDetail({ runId }: { runId: string }) {
           </button>
         </div>
         <div className="drawer-b" style={{ padding: 0, flex: 1 }}>
-          <div data-testid="trace-master-detail" className="trace-grid">
+          <div
+            data-testid="trace-master-detail"
+            className="trace-grid"
+            ref={traceGridRef}
+            style={
+              railWidth != null
+                ? ({ "--trace-rail-w": `${railWidth}px` } as React.CSSProperties)
+                : undefined
+            }
+          >
             <NavRail nodes={nodes} overview={overviewItems} selection={selection} />
+            <PaneResizeHandle
+              ariaLabel="Resize the step list"
+              testId="trace-split-resize"
+              className="trace-split-handle"
+              onResize={(clientX) => {
+                const left = traceGridRef.current?.getBoundingClientRect().left ?? 0;
+                setRailWidth(clamp(clientX - left, RAIL_MIN, RAIL_MAX));
+              }}
+            />
             <Detail
               selected={selection.selected}
-              flat={flat}
+              nodes={nodes}
               runId={runId}
+              snapshot={snapshot}
               pipeline={snapshot?.pipeline ?? null}
               events={events}
               repoCount={repoNames.length}
@@ -304,8 +383,9 @@ function spillPhrase(snapshot: RunSnapshot | null): string | null {
 
 interface DetailProps {
   selected: string;
-  flat: Map<string, { node: ExecutionNodeProps; parentLabel: string | null }>;
+  nodes: ExecutionNodeProps[];
   runId: string;
+  snapshot: RunSnapshot | null;
   pipeline: string | null;
   events: ReturnType<typeof useRunEvents>;
   repoCount: number;
@@ -330,23 +410,72 @@ function Detail(props: DetailProps) {
   if (props.selected === RESULT_ID) {
     return <ResultDetail runId={props.runId} prUrl={props.prUrl} pullRequests={props.pullRequests} />;
   }
-  const entry = props.flat.get(props.selected);
-  const node = entry?.node ?? null;
-  const footer = node?.label === ANALYZE_STEP_LABEL
-    ? <AnalyzeMarkdownSection runId={props.runId} />
-    : undefined;
-  return <DetailPane node={node} parentLabel={entry?.parentLabel ?? null} footer={footer} />;
+  return (
+    <StepDetail
+      runId={props.runId}
+      snapshot={props.snapshot}
+      railNode={props.nodes.find((n) => n.id === props.selected) ?? null}
+      stepIndex={stepIndexOf(props.selected)}
+    />
+  );
 }
 
-function flattenNodes(
-  nodes: ExecutionNodeProps[],
-): Map<string, { node: ExecutionNodeProps; parentLabel: string | null }> {
-  const map = new Map<string, { node: ExecutionNodeProps; parentLabel: string | null }>();
-  for (const n of nodes) {
-    map.set(n.id, { node: n, parentLabel: null });
-    for (const c of n.children ?? []) map.set(c.id, { node: c, parentLabel: n.label });
-  }
-  return map;
+// p0388b: the selected step's body is ONE clamped page of that step's own
+// events, fetched on selection and paged through the Seq cursor. The rail row
+// supplies the identity (label, status, duration, cost) — it comes from the
+// projection and is complete; the page supplies only the body, so nothing here
+// depends on the client's live event window.
+//
+// p0388d: the page now starts at the step's NEWEST events and follows the run
+// while it is live. What it is not showing is stated above the body, with the
+// walk back into history as an explicit control next to the statement.
+function StepDetail({
+  runId,
+  snapshot,
+  railNode,
+  stepIndex,
+}: {
+  runId: string;
+  snapshot: RunSnapshot | null;
+  railNode: ExecutionNodeProps | null;
+  stepIndex: number | null;
+}) {
+  const page = useRunStepEvents(runId, stepIndex, isRunLive(snapshot?.status));
+  // The step's page is a bounded event list — the same composer that used to
+  // fold the whole run now composes exactly one step from exactly its events.
+  const { nodes: composed } = useRunExecutionTree(page.events, snapshot, runId);
+  const body = composed[0]?.body;
+  const children = composed[0]?.children ?? [];
+  const node = railNode ? { ...railNode, body } : null;
+  const lead = page.hasOlder ? (
+    <div
+      data-testid="step-events-older-notice"
+      className="mb-3 flex flex-wrap items-center gap-3 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-600"
+    >
+      <span>Showing this step&rsquo;s newest events — older ones exist.</span>
+      <button
+        type="button"
+        data-testid="step-events-load-older"
+        className="rounded-md border border-stone-300 bg-white px-3 py-1 text-sm text-stone-600 hover:bg-stone-50"
+        disabled={page.loading}
+        onClick={page.loadOlder}
+      >
+        {page.loading ? "Loading…" : "Load older events"}
+      </button>
+    </div>
+  ) : null;
+  const footer = (
+    <>
+      {children.map((c) => (
+        <ExecutionNode key={c.id} {...c} depth={0} />
+      ))}
+      {railNode?.label === ANALYZE_STEP_LABEL && <AnalyzeMarkdownSection runId={runId} />}
+    </>
+  );
+  // p0395: a spliced phase step names its phase ONCE, in the breadcrumb — the
+  // title carries the clean step name (the rail already stripped the prefix).
+  const parentLabel = railNode?.phaseId ? `Phase ${railNode.phaseId}` : null;
+  return <DetailPane node={node} parentLabel={parentLabel} footer={footer} lead={lead} />;
 }
 
 // p0259: a cancelled run is not a failure — it gets its own neutral banner.

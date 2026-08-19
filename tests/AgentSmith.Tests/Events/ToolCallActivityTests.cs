@@ -1,3 +1,4 @@
+using AgentSmith.Infrastructure.Services.RateLimiting;
 using AgentSmith.Application.Services;
 using AgentSmith.Application.Services.Events;
 using AgentSmith.Contracts.Events;
@@ -39,7 +40,7 @@ public sealed class ToolCallActivityTests
         ctx.BeginCallScope("coding-agent-master", "Execute");
         var client = new EventPublishingChatClient(
             new StubChat("Editing Foo.cs to add the guard clause.\nThen I'll run the tests."),
-            EventTestStubs.NoOp, ctx, EmptyPricing());
+            EventTestStubs.NoOp, ctx, new LlmCallCostCalculator(EmptyPricing()), new ThrottleWaitReporter());
 
         await client.GetResponseAsync(
             new[] { new ChatMessage(ChatRole.User, "go") }, options: null, CancellationToken.None);
@@ -55,6 +56,8 @@ public sealed class ToolCallActivityTests
         public string? CurrentRunId => runId;
         public CallScope? CurrentCallScope => scope;
         public IDisposable BeginScope(string id) => new NoOp();
+        public int? CurrentStepIndex => null;
+        public IDisposable BeginStepScope(int stepIndex) => new NoOp();
         public IDisposable BeginCallScope(string role, string phase, string? repoName = null) => new NoOp();
         private sealed class NoOp : IDisposable { public void Dispose() { } }
     }
@@ -65,6 +68,8 @@ public sealed class ToolCallActivityTests
         public string? CurrentRunId => runId;
         public CallScope? CurrentCallScope => _scope;
         public IDisposable BeginScope(string id) => new NoOp();
+        public int? CurrentStepIndex => null;
+        public IDisposable BeginStepScope(int stepIndex) => new NoOp();
         public IDisposable BeginCallScope(string role, string phase, string? repoName = null)
         {
             _scope = new CallScope(role, phase, repoName);

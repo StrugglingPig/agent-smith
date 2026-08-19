@@ -199,7 +199,7 @@ public sealed class MultiRepoBootstrapTests
             var handler = new BootstrapCheckHandler(
                 _readerFactoryMock.Object,
                 RunStateConceptsTestFactory.Default,
-                NullLogger<BootstrapCheckHandler>.Instance);
+                new SandboxTargets(), NullLogger<BootstrapCheckHandler>.Instance);
             return handler.ExecuteAsync(new BootstrapCheckContext(Pipeline), CancellationToken.None);
         }
 
@@ -208,7 +208,7 @@ public sealed class MultiRepoBootstrapTests
             Pipeline.Set(ContextKeys.ResolvedPipeline, new ResolvedPipelineConfig(
                 PipelineName: pipelineName,
                 Agent: new AgentConfig(),
-                SkillsPath: "skills/coding",
+                SkillsPath: "skills",
                 CodingPrinciplesPath: null));
             var handler = new BootstrapGateHandler(
                 RunStateConceptsTestFactory.Default,

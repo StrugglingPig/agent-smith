@@ -1,20 +1,27 @@
 namespace AgentSmith.Contracts.Commands;
 
 /// <summary>
-/// Plan + diff + approval PipelineContext keys. Covers GeneratePlan output,
-/// the open-questions round-trip, the empty-plan gate, and the wire-format
-/// JSON/markdown payloads consumed by WriteRunResultHandler + the Redis
-/// pipeline-storage layer.
+/// Plan + diff + approval PipelineContext keys. Covers the legacy Plan entity
+/// (p0394a retired its GeneratePlan producer; the key survives for the
+/// empty-plan gate and old run records), the open-questions round-trip, and the
+/// wire-format JSON/markdown payloads consumed by WriteRunResultHandler + the
+/// Redis pipeline-storage layer.
 /// </summary>
 public static partial class ContextKeys
 {
     public const string Plan = "Plan";
     public const string CodeChanges = "CodeChanges";
 
+    /// <summary>p0452: the commands the agent ran in this phase, as evidence for the
+    /// delivery account. Until it could see them, three runs were refused for searches
+    /// the agent had actually run.</summary>
+    public const string PhaseCommands = "PhaseCommands";
+
     /// <summary>p0341: the coding master's durable <c>ProgressLedger</c> — seeded
-    /// from the ratified plan, kept current via update_progress, source-of-truth
-    /// copy. Read by the nudge builders (re-drives resume the checklist) and by
-    /// WriteRunResultHandler (the done-status honesty diagnostic).</summary>
+    /// from the ratified phase spec's steps (p0394a), kept current via
+    /// update_progress, source-of-truth copy. Read by the nudge builders
+    /// (re-drives resume the checklist) and by WriteRunResultHandler (the
+    /// done-status honesty diagnostic).</summary>
     public const string ProgressLedger = "ProgressLedger";
 
     /// <summary>p0241: the coding master's parsed structured verification verdict

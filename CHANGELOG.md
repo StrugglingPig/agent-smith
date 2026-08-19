@@ -1,5 +1,201 @@
 # Changelog
 
+## [0.132.0](https://github.com/holgerleichsenring/agent-smith/compare/v0.131.4...v0.132.0) (2026-08-19)
+
+
+### Features
+
+* the account sees what the agent ran (p0452) ([8f6eee5](https://github.com/holgerleichsenring/agent-smith/commit/8f6eee5f83a0e418a86948b33a90bd72a01b6a4a))
+* the account sees what the agent ran (p0452) ([e70e555](https://github.com/holgerleichsenring/agent-smith/commit/e70e555e3b1b65ef5e8ff90b8098d7619f1be264))
+
+
+### Bug Fixes
+
+* a command that cannot fail is not a verification (p0451) ([e094232](https://github.com/holgerleichsenring/agent-smith/commit/e0942328a917082dcd29a38d48d9dad139f96f6c))
+* a command that cannot fail is not a verification (p0451) ([3552aa0](https://github.com/holgerleichsenring/agent-smith/commit/3552aa03869fed69679656e5a2ec47d669eae2dc))
+
+## [0.131.4](https://github.com/holgerleichsenring/agent-smith/compare/v0.131.3...v0.131.4) (2026-08-19)
+
+
+### Bug Fixes
+
+* a cut with a finding beats no cut (p0447) ([ebb9472](https://github.com/holgerleichsenring/agent-smith/commit/ebb94723f29d5e6dff488c9d1b35ff12f2bf5384))
+* a question in a repair pass is still asked (p0449) ([abb80c4](https://github.com/holgerleichsenring/agent-smith/commit/abb80c4f7d0791ab229b32bf93296274f822e9d6))
+* a question in a repair pass is still asked (p0449) ([ae924aa](https://github.com/holgerleichsenring/agent-smith/commit/ae924aaa081fba075f2eb642c84fd70f0d83d387))
+* a run notice is not the ticket conversation (p0448) ([15b7bc7](https://github.com/holgerleichsenring/agent-smith/commit/15b7bc78ebdfcb3c6a54049d9794694a065cb1bf))
+* a run notice is not the ticket conversation (p0448) ([7f59147](https://github.com/holgerleichsenring/agent-smith/commit/7f591475e18fb07634fb3f6794f9b7fe35e1e7ef))
+* the cut reviewer judges what it saw, and a cut with a finding survives (p0446, p0447) ([2c1a2f9](https://github.com/holgerleichsenring/agent-smith/commit/2c1a2f93ba2e3e41e3a89a0d7327a404791dbbf9))
+* the not-in-ticket verdict needs the whole ticket (p0446) ([2f06328](https://github.com/holgerleichsenring/agent-smith/commit/2f06328bc4d856fc093c882e8b4ddb16f2325bbe))
+
+## [0.131.3](https://github.com/holgerleichsenring/agent-smith/compare/v0.131.2...v0.131.3) (2026-08-18)
+
+
+### Bug Fixes
+
+* a parked run is readable like every other (p0445) ([fa75a49](https://github.com/holgerleichsenring/agent-smith/commit/fa75a49a1aae68bd6661dd7a3c9089c94cd41f64))
+* a parked run is readable like every other (p0445) ([97b1cc1](https://github.com/holgerleichsenring/agent-smith/commit/97b1cc1dba4d0dcaa6dd8f908a7939a1519facb2))
+* a phase starts without the last one's repair (p0444) ([67775cf](https://github.com/holgerleichsenring/agent-smith/commit/67775cfa3832ae51ace1d85cb21ef02b2d00e9ad))
+* a phase starts without the last one's repair (p0444) ([4956c36](https://github.com/holgerleichsenring/agent-smith/commit/4956c363b36d67c9e02d58db4f9bfb56850f8255))
+
+## [0.131.2](https://github.com/holgerleichsenring/agent-smith/compare/v0.131.1...v0.131.2) (2026-08-18)
+
+
+### Bug Fixes
+
+* a drain test waits for what it asserts (p0443) ([43469d9](https://github.com/holgerleichsenring/agent-smith/commit/43469d99a4139ae8e72aeca435bf2a7644b1f81e))
+* a drain test waits for what it asserts (p0443) ([0e09b54](https://github.com/holgerleichsenring/agent-smith/commit/0e09b54ba1720eb06f4bffaab7619abf85ba5145))
+
+## [0.131.1](https://github.com/holgerleichsenring/agent-smith/compare/v0.131.0...v0.131.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* a parked run says it needs you (p0440) ([ec768d9](https://github.com/holgerleichsenring/agent-smith/commit/ec768d9ba139cbcbd2fe12bbb4cc9dd8406eb1b0))
+* a repeated step belongs to its phase, and the panel says what the run spent its time on (p0341g) ([c3f80b3](https://github.com/holgerleichsenring/agent-smith/commit/c3f80b380a3fe2bdd582eb387c1803ee586260cf))
+* a run id is shortened where it differs (p0441) ([79a2acf](https://github.com/holgerleichsenring/agent-smith/commit/79a2acf2e3b807d11630bedbd33fd196e388174f))
+* the PR survives a provider blip, the suite migrates once, and the why-page wears the run's header (p0434, p0432) ([f46c10f](https://github.com/holgerleichsenring/agent-smith/commit/f46c10fc8724f08969fa1d4a7133c9ae9a0284b2))
+* the session batch — repair attribution, work breakdown, PR resilience, one-migration suite, parked runs, run ids (p0341g, p0432, p0434, p0440, p0441) ([b10ab78](https://github.com/holgerleichsenring/agent-smith/commit/b10ab78ff79b7c71404930e5059a531bc60de973))
+
+## [0.131.0](https://github.com/holgerleichsenring/agent-smith/compare/v0.130.0...v0.131.0) (2026-08-18)
+
+
+### Features
+
+* the account goes back to the agent that can close it (p0438) ([4a3aa8a](https://github.com/holgerleichsenring/agent-smith/commit/4a3aa8a56841544574a70f9f45398298d8a487c6))
+* the account goes back to the agent that can close it (p0438) ([f398e18](https://github.com/holgerleichsenring/agent-smith/commit/f398e1843d88e005c81e2e353d0e54336da7768f))
+
+
+### Bug Fixes
+
+* a lockfile that can be ignored is not a lockfile (p0435) ([33251f5](https://github.com/holgerleichsenring/agent-smith/commit/33251f5463f515b05500e82f99547ecba5c1d8cf))
+* a lockfile that can be ignored is not a lockfile (p0435) ([f9c1617](https://github.com/holgerleichsenring/agent-smith/commit/f9c16178c3d516362666051af9a37dff2dd1c533))
+* the gate runs after the work it judges (p0437) ([0371354](https://github.com/holgerleichsenring/agent-smith/commit/0371354488c6542c1c68b1c54a62453218c1c7a2))
+* the gate runs after the work it judges (p0437) ([a4fc67e](https://github.com/holgerleichsenring/agent-smith/commit/a4fc67e4b9ad2b899a424ec68b55e1b669d6e801))
+* the preflight knows both shapes an agent's model can take (p0436) ([efa9a16](https://github.com/holgerleichsenring/agent-smith/commit/efa9a169939b5adb96af9828d840cb2b55c391a8))
+* the preflight knows both shapes an agent's model can take (p0436) ([a29da95](https://github.com/holgerleichsenring/agent-smith/commit/a29da9554c59bd42b0fd4428802fa6335c85cb4a))
+* the thread crosses the pass boundary (p0341f) ([ee8d97d](https://github.com/holgerleichsenring/agent-smith/commit/ee8d97d796fa45d39c7f53d9f15c9f678115fd07))
+* the thread crosses the pass boundary (p0341f) ([ff99482](https://github.com/holgerleichsenring/agent-smith/commit/ff994823b4903be417fae379423f16dd5a235e9a))
+* workflow ([bfbebbf](https://github.com/holgerleichsenring/agent-smith/commit/bfbebbf51eacedb3a32d6d905a85a728e137e44e))
+* workflow ([0e5387b](https://github.com/holgerleichsenring/agent-smith/commit/0e5387b359ba5231a5c9be7f99e3dd02504f3c31))
+
+## [0.130.0](https://github.com/holgerleichsenring/agent-smith/compare/v0.129.0...v0.130.0) (2026-08-17)
+
+
+### Features
+
+* a failure names itself, and delivery is accounted for ([ed94a0d](https://github.com/holgerleichsenring/agent-smith/commit/ed94a0dc30594833797b1af5c9412ca99d58cf37))
+* a failure names itself, and delivery is accounted for (p0419, p0420) ([0bf2159](https://github.com/holgerleichsenring/agent-smith/commit/0bf21593a90cd9c9269d1683f666d81f44c18778))
+* a live-target finding cites an endpoint, and the citation is resolved (p0429a) ([8599be7](https://github.com/holgerleichsenring/agent-smith/commit/8599be7d05f336d2524910cf26109b72cd9d4da4))
+* a recorded run replays without a model (p0427) ([90cb986](https://github.com/holgerleichsenring/agent-smith/commit/90cb98609a452e43bada9e17777a89cc4a7c77e7))
+* a run can be driven by an external agent instead of a provider (p0416) ([c74aab3](https://github.com/holgerleichsenring/agent-smith/commit/c74aab3683dcb5cdd938e53fa71236dd8ec71be9))
+* a run proves its preconditions before it spends on them (p0428) ([308d81d](https://github.com/holgerleichsenring/agent-smith/commit/308d81d389393e4065f94d570a57e40c57cc2c0f))
+* a run records itself (p0423) ([d4db4d4](https://github.com/holgerleichsenring/agent-smith/commit/d4db4d4fe2ae0f6757470a69155fc7e78489734d))
+* a scan states what it looked for, and its findings are substantiated (p0429) ([a757a64](https://github.com/holgerleichsenring/agent-smith/commit/a757a6405437a0f173b56e7ac4200c04e00931b7))
+* every step reports where its wall-clock went (p0404) ([d1782be](https://github.com/holgerleichsenring/agent-smith/commit/d1782bee02fdbcc243d1a7fe86fc289e5c2e3bad))
+* one gate decides delivery, and it reads the branch (p0420, p0421) ([14917c6](https://github.com/holgerleichsenring/agent-smith/commit/14917c6e1d77cb5c28687b44054571cdc72a2256))
+* sandboxes reuse a warm package cache, and a killed command says why (p0407) ([337c813](https://github.com/holgerleichsenring/agent-smith/commit/337c813bd350327c970b22d87c77ae5c9a56ce52))
+* ships_code phase semantics + verify command discovery — no guessed filenames (p0400) ([ef3acc0](https://github.com/holgerleichsenring/agent-smith/commit/ef3acc0f0a75e5ffa44e42eb6f4b0648e8982851))
+* step classes condense the drawer to the run's story; sidebar rows single-line by default (p0398, p0395b) ([6454fa3](https://github.com/holgerleichsenring/agent-smith/commit/6454fa388d0c445e82414d89747059fd1e87a335))
+* the control flow explains itself — a diagram generated from the presets (p0408) ([67cd5df](https://github.com/holgerleichsenring/agent-smith/commit/67cd5df73f20b09b83b9bbd252b5fe78f113ba2c))
+* the cut is reviewed before it is built (p0422) ([d61a716](https://github.com/holgerleichsenring/agent-smith/commit/d61a7164953ebe7847633428d03e6a8d2f74b3a8))
+* the cut is reviewed before it is built, and the run explains itself ([3eb305c](https://github.com/holgerleichsenring/agent-smith/commit/3eb305c01fbb4d1647862c44f9492b9112cf387e))
+* the process is sized to the shape of the work (p0413) ([0d016ca](https://github.com/holgerleichsenring/agent-smith/commit/0d016ca411c43ccf1f98adeb74c7bf47dc9a7833))
+* the run explains itself on screen, and a live-target finding cites an endpoint (p0423b + p0429a) ([6953598](https://github.com/holgerleichsenring/agent-smith/commit/69535982a52331a3007ac29c665a7a271cb0c7fd))
+* the run explains itself on screen, and a live-target finding cites an endpoint (p0423b + p0429a) ([81f26b7](https://github.com/holgerleichsenring/agent-smith/commit/81f26b7a6dbb35a220b52150cc3f7655dfd346fb))
+* the run is watched on one screen and diagnosed on another (p0423b) ([0f93e3e](https://github.com/holgerleichsenring/agent-smith/commit/0f93e3eb9a6a08200bc659b50ff008892bbf6a01))
+* the run shows what is still coming (p0405) ([3eb7211](https://github.com/holgerleichsenring/agent-smith/commit/3eb7211a0408fa2b4709bfaeb16d8c840d8463ce))
+* the spec is the plan — ledger seeds from the phase draft, plan call leaves the phase path (p0394a) ([4f08976](https://github.com/holgerleichsenring/agent-smith/commit/4f089760a81ea342915848332efa9cbb7bbcd791))
+* the spec is the plan; step classes condense the drawer; single-line rows (p0394a + p0398 + p0395b) ([feccbe2](https://github.com/holgerleichsenring/agent-smith/commit/feccbe212793d78d4e72785dde527d88c425299e))
+
+
+### Bug Fixes
+
+* a citation written for a human is still a citation (p0422) ([a34437e](https://github.com/holgerleichsenring/agent-smith/commit/a34437e39b292377433df290104372ebc8f82770))
+* a declared command is a command line, and an imperfect answer is data (p0425 + p0426) ([f55b021](https://github.com/holgerleichsenring/agent-smith/commit/f55b02152d72a7f7623944bcdc78a2b19b0100e7))
+* a knowledge phase can satisfy the acceptance gate (p0406) ([8518a43](https://github.com/holgerleichsenring/agent-smith/commit/8518a4385bb34f36066460af75d501408be81225))
+* a shipped phase leaves the planned list (p0423b) ([ef417c4](https://github.com/holgerleichsenring/agent-smith/commit/ef417c47fe0693edf4c82d94b1231599ca962238))
+* a step that reaches a model cannot be declared deterministic (p0433) ([3df2b6d](https://github.com/holgerleichsenring/agent-smith/commit/3df2b6daec702db4f5615e652a72a2955355cef6))
+* a step that reaches a model cannot be declared deterministic (p0433) ([27d37ea](https://github.com/holgerleichsenring/agent-smith/commit/27d37ea4d5c22de7d3289d687dc7c09a6152d274))
+* **dashboard:** the activity row survives an event it has never heard of ([3869dd9](https://github.com/holgerleichsenring/agent-smith/commit/3869dd9ddace3ce105b8a3adb62a8ed97cfa74c3))
+* declared verify commands run at the repo root; derivation must declare ships_code (p0400a) ([71da1f2](https://github.com/holgerleichsenring/agent-smith/commit/71da1f26354ab56ad7eb1442a510f292e73a2e00))
+* declared verify commands run at the repo root; derivation must declare ships_code (p0400a) ([c11f672](https://github.com/holgerleichsenring/agent-smith/commit/c11f67248c5538f7c4fde70ce83283b8b6122575))
+* drawer widths are fractions of the viewport; sidebar labels wrap (p0395a) ([a219127](https://github.com/holgerleichsenring/agent-smith/commit/a219127d827c2e58b0711a5ee57ea2f79a1cd273))
+* drawer widths are fractions of the viewport; sidebar labels wrap (p0395a) ([7d8871d](https://github.com/holgerleichsenring/agent-smith/commit/7d8871d5dcd533f6a69d2f638dec0677c2c9985d))
+* live-run findings — plan-JSON regression, spec-commit identity, run-viewer feedback (p0394 + p0395) ([3e0d0e5](https://github.com/holgerleichsenring/agent-smith/commit/3e0d0e55f3a77b622e6db81da868998aac2c49b5))
+* multi-repo plan rules render inside the template; staged commits ensure git identity (p0394) ([b225080](https://github.com/holgerleichsenring/agent-smith/commit/b2250805bedb9afbd4653250dae8eb2f51685687))
+* one tool result cannot blow the context (p0422) ([9896774](https://github.com/holgerleichsenring/agent-smith/commit/98967748e5bfe3640ae1ebb8efaa9b237eb0b90d))
+* retired plan commands classify by literal name — old run records keep their step class ([26f80df](https://github.com/holgerleichsenring/agent-smith/commit/26f80df5d9f5c00164348f3b4cc0586a51d33960))
+* run-viewer feedback — done-list rendering, resizable drawer, sourced phase documents, step labels (p0395) ([3ff226d](https://github.com/holgerleichsenring/agent-smith/commit/3ff226d8aa666deeb4e671b912974ed0283093db))
+* sandbox idle wait survives transient Redis; LiveLLM plan-call golden (p0396 + p0397) ([ba7571e](https://github.com/holgerleichsenring/agent-smith/commit/ba7571ea8017ae7ec614f32e30b69d97cabaa1a4))
+* sandbox idle wait survives transient Redis; vanish summary tells the true exit cause (p0396) ([db3c5d8](https://github.com/holgerleichsenring/agent-smith/commit/db3c5d8aae179fd83cb6316d7a253dc740c24ab4))
+* spec-set fidelity + hygiene; ships_code phase semantics + verify command discovery (p0399 + p0400) ([bf0c383](https://github.com/holgerleichsenring/agent-smith/commit/bf0c3834ac4b372f1a414451b69791a1aa049952))
+* the agent is told what the framework staged for it (p0422) ([0ce92ff](https://github.com/holgerleichsenring/agent-smith/commit/0ce92ff484a46143ddd78f2f8b133dd76ef311b8))
+* the build gate reads the branch, and a citation may name several commands (p0422) ([fef8e05](https://github.com/holgerleichsenring/agent-smith/commit/fef8e05e02f263430272db0db668d197628e224f))
+* the conversation carries what the operator said, not our echo (p0424) ([551994e](https://github.com/holgerleichsenring/agent-smith/commit/551994e39019e531bc7c06a0684a33cca9fd5bb5))
+* the deliverable is declared, not defaulted — and the decidable coding principles get teeth (p0400b, p0400c, p0401, p0403) ([#499](https://github.com/holgerleichsenring/agent-smith/issues/499)) ([2acfb1f](https://github.com/holgerleichsenring/agent-smith/commit/2acfb1fb38a2ea18b6c81a040c8be3154401a6e1))
+* the git identity is set once at checkout, and the working state carries the diff (p0411) ([1215899](https://github.com/holgerleichsenring/agent-smith/commit/1215899064ef1d1660dd239797221f5334b20ceb))
+* the record guard survives its own success (p0430) ([c1b12f3](https://github.com/holgerleichsenring/agent-smith/commit/c1b12f3f4366f467b180c3217361266f10c139aa))
+* the worker answers as the model, not as itself (p0424) ([47495a6](https://github.com/holgerleichsenring/agent-smith/commit/47495a6af51e4bb455e57b37bc51fb5fa67cc714))
+* ticket segments decode to text; a spec revision fully replaces the set (p0399) ([22deb0c](https://github.com/holgerleichsenring/agent-smith/commit/22deb0c0735ee0b44bcfa62d52213862348e66ff))
+
+## [0.129.0](https://github.com/holgerleichsenring/agent-smith/compare/v0.128.0...v0.129.0) (2026-08-03)
+
+
+### Features
+
+* a done ledger entry stays done, and every transition is on the trail (p0374a) ([be98d96](https://github.com/holgerleichsenring/agent-smith/commit/be98d96d0bde6f42e3255549f85e3c2f22e82cda))
+* a master cites shared methodology and the loader inlines it (p0313b) ([1d27afd](https://github.com/holgerleichsenring/agent-smith/commit/1d27afd1045df310a4953f14ad1a51787de77999))
+* any ticket becomes an ordered set of phase specs (p0393a) ([e5333bd](https://github.com/holgerleichsenring/agent-smith/commit/e5333bd0f810fdb76bd80da7e03a8242d5d56a49))
+* any ticket becomes an ordered set of phase specs (p0393a) ([7a6893e](https://github.com/holgerleichsenring/agent-smith/commit/7a6893ee36ef75c5fe70c019880ff6bf3b9103aa))
+* close the placeholder leak and make it undriftable (p0313) ([af22b8b](https://github.com/holgerleichsenring/agent-smith/commit/af22b8beae68c90dac73e1c31c146ed548f98904))
+* Config Studio offers every tracker field and says what is missing (p0392) ([ab32f82](https://github.com/holgerleichsenring/agent-smith/commit/ab32f8270b7aa654ef0431e9557987317f88783e))
+* done stays done, and the durable-dialogue spine gets its proof back (p0374a + p0393b) ([799e641](https://github.com/holgerleichsenring/agent-smith/commit/799e6414d2e937eda65ec9112e995701460efe1d))
+* no startup path throws, and the Studio shows what is missing (p0391b + p0392) ([dac2605](https://github.com/holgerleichsenring/agent-smith/commit/dac26052d3791e06984d14f81e8bba1aac8b58c8))
+* one code pipeline, a real build gate, the pin on 4.0.0 (p0393) ([c91e816](https://github.com/holgerleichsenring/agent-smith/commit/c91e8160b6a944be7537d6f6025e729852034294))
+* one code pipeline, a real build gate, the pin on 4.0.0 (p0393) ([d6cde18](https://github.com/holgerleichsenring/agent-smith/commit/d6cde1884fd76da9f2559c6788472563121a34ed))
+* one command is one step — the batch path is gone (p0312d) ([0f6d686](https://github.com/holgerleichsenring/agent-smith/commit/0f6d686df56bee427f466197d1a304fe43b42020))
+* one skills root, Triage retires, pr-review gets its master (p0312a p0312b p0312c) ([f8935b8](https://github.com/holgerleichsenring/agent-smith/commit/f8935b83bc2cdefeed0aa4dd534cbe3accfebb81))
+* one skills root, Triage retires, pr-review gets its master (p0312a/b/c) ([6c69213](https://github.com/holgerleichsenring/agent-smith/commit/6c692139a663aa11e684b80f065fa4857cb920c8))
+* **p0390:** derive a versioned work spec from the ticket ([15a38ea](https://github.com/holgerleichsenring/agent-smith/commit/15a38eab0467b656d6d6e605922726e1c50a4ca5))
+* **p0390:** master input, hand-back routing, spec exclusion and viewer ([c984394](https://github.com/holgerleichsenring/agent-smith/commit/c9843945052ca9829cbdbe68ffc71b8ab8109a31))
+* **p0390:** work-spec contract, serializer and validator ([0d0edb6](https://github.com/holgerleichsenring/agent-smith/commit/0d0edb65f136116165a11f775ec812584a2ea52c))
+* **p0391a:** a blocking finding disables the trigger, not the process ([9a1215c](https://github.com/holgerleichsenring/agent-smith/commit/9a1215c91381e2ca32cbfaa8e7f56888a6e033d1))
+* **p0391a:** findings endpoint + degraded banner ([8d8163a](https://github.com/holgerleichsenring/agent-smith/commit/8d8163a5e3e537eacd5689dcd3eefe00d260f00a))
+* **p0391a:** startup findings contract; config rules record instead of throwing ([8e680eb](https://github.com/holgerleichsenring/agent-smith/commit/8e680eb2741a4387a544ea99025aab34501e715e))
+* **p0391a:** the diagnostic surface comes up first and unconditionally ([9bde8e5](https://github.com/holgerleichsenring/agent-smith/commit/9bde8e5a7a76e80deaa13f2ba82201067c44d178))
+* **p0391a:** the server always starts — aborting the startup is never justifiable ([bc3af2d](https://github.com/holgerleichsenring/agent-smith/commit/bc3af2d8e340ac4dd1f99b81f792c962d4211539))
+* retire the batch path (p0312d) + shared methodology references (p0313b) ([3433c70](https://github.com/holgerleichsenring/agent-smith/commit/3433c70b86e38b80b186c57f12a46cc28f56e0d6))
+* the step detail follows a live run (p0388d) ([396c45c](https://github.com/holgerleichsenring/agent-smith/commit/396c45cbab79e52120baebd83d0434b3f6942700))
+* the step detail follows a live run (p0388d) ([4cce465](https://github.com/holgerleichsenring/agent-smith/commit/4cce4656458b837eb2a393f21bda4d834621abaf))
+
+
+### Bug Fixes
+
+* a job spawner always exists, so the server always starts ([ed65ebd](https://github.com/holgerleichsenring/agent-smith/commit/ed65ebd5f3bce5546a0d1ac57486eb003aba3584))
+* CI tests run against the catalog the build pins ([70d0bc1](https://github.com/holgerleichsenring/agent-smith/commit/70d0bc1df184ca75fa4b2eec3db1ee60d57744cf))
+* no startup path throws, and the CLI reports what the server would (p0391b) ([feb0027](https://github.com/holgerleichsenring/agent-smith/commit/feb002786059e6e79f7f17950173d7154b5f5260))
+* **p0391a:** bound each startup probe so a blackholed dependency cannot hold the port shut ([2bbb1d8](https://github.com/holgerleichsenring/agent-smith/commit/2bbb1d8955446746cc301571ff44e5858bed8da8))
+* the principles reader survives both catalog layouts (p0312a) ([2cf92c5](https://github.com/holgerleichsenring/agent-smith/commit/2cf92c56b5123c3735325822ee3533d8e33b4217))
+* the trail row renders a ledger transition (p0374a) ([2668501](https://github.com/holgerleichsenring/agent-smith/commit/26685018fc81c6243939477cd325d3a244e51faa))
+
+## [0.128.0](https://github.com/holgerleichsenring/agent-smith/compare/v0.127.2...v0.128.0) (2026-07-31)
+
+
+### Features
+
+* decision category projection and harness step-attribution proof (p0388c) ([3cdb1fc](https://github.com/holgerleichsenring/agent-smith/commit/3cdb1fc83fadaf4fa7896d22fe8134d1404f256f))
+* master exit paths — a working way out for the coding master (p0391) ([2cb06ff](https://github.com/holgerleichsenring/agent-smith/commit/2cb06ff0bcb4a2cf5877e98e97e438e5ec233d25))
+* run rail and step detail from DB projections (p0388b) ([d8a6941](https://github.com/holgerleichsenring/agent-smith/commit/d8a6941f6e6759ca30346a5126c9df224e4f762b))
+* run rail from projections (p0388a + p0388b) ([91df54c](https://github.com/holgerleichsenring/agent-smith/commit/91df54cbc6500f26ec9165d2d51e2d75e54394b4))
+* step attribution on persisted run rows (p0388a) ([9b38c8a](https://github.com/holgerleichsenring/agent-smith/commit/9b38c8a48baa85c598d52d7926b2eb8648b08ce4))
+
+
+### Bug Fixes
+
+* **hooks:** phase gate must test the tree the commit runs in ([18d89d5](https://github.com/holgerleichsenring/agent-smith/commit/18d89d548a8e787697ee394dea60640da23a701d))
+* **hooks:** phase gate must test the tree the commit runs in ([6c728c3](https://github.com/holgerleichsenring/agent-smith/commit/6c728c353ed3f57cdbc48cc718b6a2d601c199c4))
+* **p0391:** park-status check as a pure load-time rule, no DI churn ([92c3c19](https://github.com/holgerleichsenring/agent-smith/commit/92c3c19176da8ad8bdbdf6b22d3f32febc9944b3))
+
 ## [0.127.2](https://github.com/holgerleichsenring/agent-smith/compare/v0.127.1...v0.127.2) (2026-07-29)
 
 

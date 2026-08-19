@@ -24,10 +24,19 @@ namespace AgentSmith.Server.Services.Events;
 /// the <see cref="ReadAllTypedAsync"/> seam exposes them strongly-typed
 /// for unit tests.</para>
 /// </summary>
-public sealed class TrailReader(IConnectionMultiplexer redis, IServiceScopeFactory scopeFactory)
+public sealed class TrailReader(IConnectionMultiplexer redis, IServiceScopeFactory scopeFactory,
+    EventEnvelopeSerializer envelopes)
 {
     public const int DefaultPageCount = 500;
     public const int MaxPageCount = 2000;
+
+    // p0388b: a step's detail page is bounded like the runs-list page — the view
+    // shows one step, and the cursor walks from there. The ceiling is what keeps
+    // a hand-edited limit from scanning a whole run's trail into one response.
+    // p0388d: this is a PAGE size, not a cap on the step: what it bounds is one
+    // response, and both directions of the walk reach every row.
+    public const int DefaultStepPageCount = 100;
+    public const int MaxStepPageCount = 200;
 
     public async Task<IReadOnlyList<object>> ReadAllAsync(string runId) =>
         (await ReadAllTypedAsync(runId)).Cast<object>().ToList();
@@ -86,7 +95,7 @@ public sealed class TrailReader(IConnectionMultiplexer redis, IServiceScopeFacto
 
     // Mirrors the broadcaster's run-group filter (JobsBroadcaster.ProcessEventAsync):
     // SandboxOutput fans out to the sandbox group only and never reaches the rail.
-    private static bool IsStructural(RunEvent e) => e.Type != EventType.SandboxOutput;
+    private bool IsStructural(RunEvent e) => e.Type != EventType.SandboxOutput;
 
     public async Task<IReadOnlyList<RunEvent>> ReadDbTrailTypedAsync(string runId)
     {
@@ -101,7 +110,7 @@ public sealed class TrailReader(IConnectionMultiplexer redis, IServiceScopeFacto
         var events = new List<RunEvent>(rows.Count);
         foreach (var row in rows)
         {
-            var ev = EventEnvelopeSerializer.DeserializeRaw(row.Type, row.PayloadJson);
+            var ev = envelopes.DeserializeRaw(row.Type, row.PayloadJson);
             if (ev is not null) events.Add(ev);
         }
         return events;
@@ -134,7 +143,7 @@ public sealed class TrailReader(IConnectionMultiplexer redis, IServiceScopeFacto
         var events = new List<object>(rows.Count);
         foreach (var row in rows)
         {
-            var ev = EventEnvelopeSerializer.DeserializeRaw(row.Type, row.PayloadJson);
+            var ev = envelopes.DeserializeRaw(row.Type, row.PayloadJson);
             if (ev is not null) events.Add(ev);
         }
         // Advance the cursor past every scanned row even if one failed to
@@ -143,13 +152,114 @@ public sealed class TrailReader(IConnectionMultiplexer redis, IServiceScopeFacto
         return new DbTrailPage(events, maxSeq);
     }
 
-    private static IReadOnlyList<object> ToEvents(StreamEntry[] entries) =>
+    /// <summary>
+    /// p0388b/p0388d: ONE step's structural events as a clamped page, read from
+    /// the NEWEST end backwards. The (RunId, StepIndex, Seq) index added in
+    /// p0388a serves both the filter and the order, so a step's detail costs
+    /// O(page) regardless of how large the run's trail grew.
+    ///
+    /// <para>p0388d: the ANCHOR is what this fixes. The p0388b query read
+    /// ascending from <c>Seq &gt; sinceSeq</c>, so opening a step that had since
+    /// produced thousands of rows returned its FIRST page — the beginning of a
+    /// step whose interesting end is what the operator opened it for.
+    /// <paramref name="beforeSeq"/> null means "the newest page"; a value walks
+    /// backwards into history, each page contiguous with the one before it so
+    /// the walk has no gaps. Events come back in display order (oldest first)
+    /// whichever direction the query ran.</para>
+    ///
+    /// <para>An unknown step index is an empty page, not an error — a step can
+    /// be selected before its events are flushed.</para>
+    /// </summary>
+    public async Task<StepEventPage> ReadStepBackwardsAsync(
+        string runId, int stepIndex, long? beforeSeq, int? limit, CancellationToken cancellationToken)
+    {
+        var page = Math.Clamp(limit ?? DefaultStepPageCount, 1, MaxStepPageCount);
+        var ceiling = beforeSeq ?? long.MaxValue;
+        using var scope = scopeFactory.CreateScope();
+        var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+        var rows = await uow.Set<Infrastructure.Persistence.Entities.RunEvent>()
+            .AsNoTracking()
+            .Where(e => e.RunId == runId && e.StepIndex == stepIndex && e.Seq < ceiling)
+            .OrderByDescending(e => e.Seq)
+            .Take(page + 1)
+            .ToListAsync(cancellationToken);
+
+        var hasOlder = rows.Count > page;
+        // Descending scan, ascending page: the extra row only proves older rows
+        // exist and is then dropped, so what the caller renders stays contiguous.
+        var slice = (hasOlder ? rows.Take(page) : rows).Reverse().ToList();
+        return new StepEventPage(
+            Materialize(slice),
+            OldestSeq: slice.Count > 0 ? slice[0].Seq : beforeSeq ?? 0,
+            NewestSeq: slice.Count > 0 ? slice[^1].Seq : beforeSeq ?? 0,
+            HasOlder: hasOlder,
+            HasNewer: false);
+    }
+
+    /// <summary>
+    /// p0388d: one step's FORWARD delta — the rows written after
+    /// <paramref name="sinceSeq"/>, in display order. This is what an open step
+    /// polls while the run is live, so the pane keeps appending instead of
+    /// freezing on the page it was opened with. <c>HasNewer</c> says the delta
+    /// was larger than one page, which lets the caller read on immediately
+    /// rather than trailing a busy step by a page per tick.
+    /// </summary>
+    public async Task<StepEventPage> ReadStepForwardAsync(
+        string runId, int stepIndex, long sinceSeq, int? limit, CancellationToken cancellationToken)
+    {
+        var page = Math.Clamp(limit ?? DefaultStepPageCount, 1, MaxStepPageCount);
+        using var scope = scopeFactory.CreateScope();
+        var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+        var rows = await uow.Set<Infrastructure.Persistence.Entities.RunEvent>()
+            .AsNoTracking()
+            .Where(e => e.RunId == runId && e.StepIndex == stepIndex && e.Seq > sinceSeq)
+            .OrderBy(e => e.Seq)
+            .Take(page + 1)
+            .ToListAsync(cancellationToken);
+
+        var hasNewer = rows.Count > page;
+        var slice = hasNewer ? rows.Take(page).ToList() : rows;
+        return new StepEventPage(
+            Materialize(slice),
+            OldestSeq: slice.Count > 0 ? slice[0].Seq : sinceSeq,
+            NewestSeq: slice.Count > 0 ? slice[^1].Seq : sinceSeq,
+            HasOlder: false,
+            HasNewer: hasNewer);
+    }
+
+    // The cursors are taken from the ROWS, not from the events, so a payload
+    // that fails to deserialize still advances the walk instead of wedging the
+    // caller in a loop that re-reads the same bad row for ever.
+    private IReadOnlyList<object> Materialize(
+        IReadOnlyList<Infrastructure.Persistence.Entities.RunEvent> rows)
+    {
+        var events = new List<object>(rows.Count);
+        foreach (var row in rows)
+        {
+            var ev = envelopes.DeserializeRaw(row.Type, row.PayloadJson);
+            if (ev is not null) events.Add(ev);
+        }
+        return events;
+    }
+
+    private IReadOnlyList<object> ToEvents(StreamEntry[] entries) =>
         ToTypedEvents(entries).Cast<object>().ToList();
 
     /// <summary>p0373: a Seq-delta page of the DB structural trail.</summary>
     public sealed record DbTrailPage(IReadOnlyList<object> Events, long MaxSeq);
 
-    private static IReadOnlyList<RunEvent> ToTypedEvents(StreamEntry[] entries)
+    /// <summary>
+    /// p0388b/p0388d: one clamped page of a single step's structural events, in
+    /// display order. Both cursors are always filled; each direction fills the
+    /// flag it can answer — <see cref="HasOlder"/> on a backwards read,
+    /// <see cref="HasNewer"/> on a forward one — and the endpoint ships only the
+    /// flag the caller's direction asked about, rather than asserting a "no"
+    /// the query never established.
+    /// </summary>
+    public sealed record StepEventPage(
+        IReadOnlyList<object> Events, long OldestSeq, long NewestSeq, bool HasOlder, bool HasNewer);
+
+    private IReadOnlyList<RunEvent> ToTypedEvents(StreamEntry[] entries)
     {
         var events = new List<RunEvent>(entries.Length);
         foreach (var entry in entries)
@@ -158,7 +268,7 @@ public sealed class TrailReader(IConnectionMultiplexer redis, IServiceScopeFacto
             {
                 var payload = pair.Value.ToString();
                 if (string.IsNullOrEmpty(payload)) continue;
-                var runEvent = EventEnvelopeSerializer.Deserialize(payload);
+                var runEvent = envelopes.Deserialize(payload);
                 if (runEvent is not null) events.Add(runEvent);
             }
         }

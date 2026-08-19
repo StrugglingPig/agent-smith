@@ -1,7 +1,11 @@
+using AgentSmith.Contracts.Expectations;
+using AgentSmith.Application.Services.Lifecycle;
 using AgentSmith.Contracts.Services;
 using AgentSmith.Application.Models;
 using AgentSmith.Application.Services;
+using AgentSmith.Application.Services.Specs;
 using AgentSmith.Application.Services.Handlers;
+using AgentSmith.Application.Services.Sandbox;
 using AgentSmith.Contracts.Commands;
 using AgentSmith.Contracts.Events;
 using AgentSmith.Contracts.Models.Configuration;
@@ -58,9 +62,17 @@ public class CommitAndPRHandlerTests
         _sut = new CommitAndPRHandler(
             _sourceFactoryMock.Object,
             _ticketFactoryMock.Object,
-            new SandboxGitOperations(NullLogger<SandboxGitOperations>.Instance, new StubSandboxFileReaderFactory()),
+            new SandboxGitOperations(new GitBranchPusher(), NullLogger<SandboxGitOperations>.Instance, new StubSandboxFileReaderFactory(), new SandboxGitIdentity(NullLogger<SandboxGitIdentity>.Instance)),
             new SecretPatternScanner(),
             _events,
+            new TicketLifecycle(), new SandboxTargets(), new PhaseAccounting(
+                new DeliveryDiff(NullLogger<DeliveryDiff>.Instance),
+                new SpecAccountant(
+                new AgentSmith.Tests.TestHelpers.ScriptedChatClientFactory(),
+                new SpecAccountCall(new AgentSmith.Tests.TestHelpers.ScriptedChatClientFactory(), new AgentSmith.Application.Services.Events.AsyncLocalRunContextAccessor(), NullLogger<SpecAccountCall>.Instance),
+                    NullLogger<SpecAccountant>.Instance),
+                new SandboxTargets(),
+                NullLogger<PhaseAccounting>.Instance),
             NullLogger<CommitAndPRHandler>.Instance);
     }
 
@@ -312,11 +324,42 @@ public class CommitAndPRHandlerTests
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    /// <summary>
+    /// p0429a: the account the gate judged the run by reaches the two surfaces a human
+    /// actually reads. Before this, a reviewer saw the outcome and never what went
+    /// unanswered — the gate knew, and told nobody.
+    /// </summary>
+    [Fact]
+    public async Task RunAccount_RendersIntoTheTicketCommentAndThePullRequestBody()
+    {
+        var pipeline = NewPipelineWithSandbox();
+        RunAccountLedger.Record(pipeline, [new SpecAccount("repo",
+        [
+            new CriterionAccount("the endpoint rejects an anonymous call", true, "Auth.cs:20"),
+            new CriterionAccount("the audit ran", true, "DependencyAuditCommand", Mechanical: true),
+        ])]);
+
+        await _sut.ExecuteAsync(CreateContext(pipeline), CancellationToken.None);
+
+        _ticketProviderMock.Verify(t => t.FinalizeAsync(
+            It.IsAny<TicketId>(),
+            It.Is<string>(s => s.Contains("What this run accounted for")
+                && s.Contains("- [x] the audit ran — verified by command")),
+            It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+
+        _sourceProviderMock.Verify(s => s.CreatePullRequestAsync(
+            It.IsAny<Repository>(), It.IsAny<string>(),
+            It.Is<string>(body => body.Contains("What this run accounted for")
+                && body.Contains("- [x] the endpoint rejects an anonymous call")),
+            It.IsAny<CancellationToken>(), It.IsAny<TicketId?>()), Times.Once);
+    }
+
     [Fact]
     public async Task ExecuteAsync_FixBugPreset_NoCodeChange_FailsAndDoesNotResolveTicket()
     {
-        // p0241 keystone: a fix-bug run that staged nothing real is a FAILURE,
-        // not a hollow "success" — and it must not mark the ticket resolved.
+        // p0421: a run that ratified CRITERIA and accounted for none of them is a gap, and
+        // the gate says so. The old gate asked the pipeline preset instead — which is why
+        // mad, legal and security had to be exempted from being checked at all.
         _sandboxMock.Reset();
         _sandboxMock.Setup(s => s.RunStepAsync(
                 It.IsAny<Step>(), It.IsAny<IProgress<StepEvent>?>(), It.IsAny<CancellationToken>()))
@@ -325,14 +368,14 @@ public class CommitAndPRHandlerTests
 
         var pipeline = NewPipelineWithSandbox();
         pipeline.Set(ContextKeys.PipelineName, "fix-bug");
-        // Truly zero changes: empty CodeChanges AND empty staged diff (sandbox
-        // reset above) — the no-code-change branch of the keystone.
+        // Ratified criteria with no account behind them: nothing measured itself.
+        pipeline.Set(ContextKeys.RunExpectation, ExpectationWithOneCriterion());
         var context = CreateContext(pipeline) with { Changes = Array.Empty<CodeChange>() };
 
         var result = await _sut.ExecuteAsync(context, CancellationToken.None);
 
         result.IsSuccess.Should().BeFalse();
-        result.Message.Should().Contain("no code changes");
+        result.Message.Should().Contain("accounted for none of them");
         _ticketProviderMock.Verify(t => t.FinalizeAsync(
             It.IsAny<TicketId>(), It.IsAny<string>(), It.IsAny<string?>(),
             It.IsAny<CancellationToken>()), Times.Never);
@@ -377,6 +420,7 @@ public class CommitAndPRHandlerTests
         pipeline.Set(ContextKeys.PipelineName, "fix-bug");
         pipeline.Set(ContextKeys.MasterVerification,
             new MasterVerification(VerificationStatus.Failed, true, false, true, false, "build failed"));
+        pipeline.Set(ContextKeys.RunExpectation, ExpectationWithOneCriterion());
         var context = CreateContext(pipeline);
 
         var result = await _sut.ExecuteAsync(context, CancellationToken.None);
@@ -386,19 +430,25 @@ public class CommitAndPRHandlerTests
         capturedBody.Should().Contain("Verification red");
     }
 
+    /// <summary>
+    /// p0421: the master's own verdict is no longer a gate input. A run that changed code
+    /// but accounted for nothing still fails — for the honest reason, which is that
+    /// nothing measured itself against the branch, not that a self-report was missing.
+    /// </summary>
     [Fact]
-    public async Task ExecuteAsync_FixBugPreset_WithChangeButNoVerdict_Fails()
+    public async Task ExecuteAsync_ChangeWithoutAnAccount_Fails_AndDoesNotAskTheMaster()
     {
         // p0241 keystone: code changed but the agent emitted no verdict → the
         // build/test outcome is unknown, so the run cannot be a success.
         var pipeline = NewPipelineWithSandbox();
         pipeline.Set(ContextKeys.PipelineName, "fix-bug");
+        pipeline.Set(ContextKeys.RunExpectation, ExpectationWithOneCriterion());
         var context = CreateContext(pipeline);
 
         var result = await _sut.ExecuteAsync(context, CancellationToken.None);
 
         result.IsSuccess.Should().BeFalse();
-        result.Message.Should().Contain("verification verdict");
+        result.Message.Should().Contain("accounted for none of them");
     }
 
     [Fact]
@@ -460,4 +510,10 @@ public class CommitAndPRHandlerTests
         SeedSandboxes(pipeline);
         return pipeline;
     }
+
+    // p0421: the gate judges what was RATIFIED. A run that ratified nothing is not judged
+    // at all — which is why these tests state a contract before expecting a verdict.
+    private static RatifiedExpectation ExpectationWithOneCriterion() =>
+        new(new ExpectationDraft("the bug", ["the bug is fixed"], [], null),
+            "ratified", "operator", DateTimeOffset.UnixEpoch, 0);
 }

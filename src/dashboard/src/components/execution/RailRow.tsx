@@ -2,11 +2,14 @@
 
 import type { NodeStatus } from "./TimingGutter";
 
-// p0205: one single-line row of the master/detail nav rail. chevron (only when
-// the node has children) · status dot · label · optional metric · duration.
-// Clicking the row selects it; clicking the chevron toggles its children
-// without changing selection. Mirrors the calm single-line index in the p0205
-// redesign mockup.
+// p0205: one row of the master/detail nav rail. chevron (only when the node
+// has children) · status dot · label · meta. Clicking the row selects it;
+// clicking the chevron toggles its children without changing selection.
+//
+// p0395b: label and meta share ONE line — meta right-aligned, label first.
+// The label clamps to at most two lines, which only engages when the rail is
+// too narrow for one; the row height flexes only in that case. The resizable
+// rail (p0395/p0395a fractions) is what makes the one-line default workable.
 
 export interface RailRowProps {
   id: string;
@@ -16,6 +19,9 @@ export interface RailRowProps {
   metric?: string | null;
   hasChildren?: boolean;
   isChild?: boolean;
+  /** p0405: an announced-but-unreached step. Muted, so the boundary between what
+   *  ran and what is still coming is visible without reading a single label. */
+  isPlanned?: boolean;
   isSelected: boolean;
   isExpanded: boolean;
   onSelect: () => void;
@@ -24,8 +30,9 @@ export interface RailRowProps {
 
 export function RailRow(props: RailRowProps) {
   const selectedCls = props.isSelected ? "bg-emerald-50 border-l-emerald-500" : "border-l-transparent";
-  const labelTone =
-    props.status === "fail"
+  const labelTone = props.isPlanned
+    ? "text-stone-400"
+    : props.status === "fail"
       ? "text-rose-700"
       : props.isSelected
       ? "font-semibold text-emerald-700"
@@ -33,12 +40,13 @@ export function RailRow(props: RailRowProps) {
   return (
     <div
       data-testid={`rail-row-${props.id}`}
+      data-planned={props.isPlanned ? "true" : "false"}
       data-selected={props.isSelected ? "true" : "false"}
       onClick={props.onSelect}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && props.onSelect()}
-      className={`flex min-h-[34px] cursor-pointer select-none items-center gap-2.5 border-l-[3px] py-1.5 hover:bg-stone-50 ${selectedCls} ${
+      className={`flex min-h-[34px] cursor-pointer select-none items-start gap-2.5 border-l-[3px] py-1.5 hover:bg-stone-50 ${selectedCls} ${
         props.isChild ? "pl-10 pr-4" : "px-4"
       }`}
     >
@@ -52,18 +60,23 @@ export function RailRow(props: RailRowProps) {
         testId={`rail-chevron-${props.id}`}
       />
       <StatusDot status={props.status} />
-      <span
-        data-testid={`rail-row-${props.id}-label`}
-        className={`flex-1 truncate dsh-body ${props.isChild ? "font-mono dsh-mono" : "font-medium"} ${labelTone}`}
-      >
-        {props.label}
-      </span>
-      {props.metric && (
-        <span className="flex-none font-mono dsh-label text-stone-400">{props.metric}</span>
-      )}
-      <span className="w-12 flex-none text-right font-mono dsh-label text-stone-400">
-        {props.durationLabel ?? ""}
-      </span>
+      <div className="flex min-w-0 flex-1 items-baseline gap-3">
+        <span
+          data-testid={`rail-row-${props.id}-label`}
+          className={`min-w-0 flex-1 line-clamp-2 dsh-body ${props.isChild ? "font-mono dsh-mono" : "font-medium"} ${labelTone}`}
+        >
+          {props.label}
+        </span>
+        {(props.metric || props.durationLabel) && (
+          <span
+            data-testid={`rail-row-${props.id}-meta`}
+            className="ml-auto flex flex-none gap-3 whitespace-nowrap font-mono dsh-label text-stone-400"
+          >
+            {props.metric && <span>{props.metric}</span>}
+            {props.durationLabel && <span>{props.durationLabel}</span>}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
@@ -79,7 +92,7 @@ function Chevron(props: {
     <span
       data-testid={props.testId}
       onClick={props.onClick}
-      className={`w-3 flex-none text-center dsh-label text-stone-400 transition-transform ${
+      className={`mt-[3px] w-3 flex-none text-center dsh-label text-stone-400 transition-transform ${
         props.isExpanded ? "rotate-90" : ""
       }`}
       aria-hidden="true"
@@ -93,7 +106,7 @@ function StatusDot({ status }: { status: NodeStatus }) {
   return (
     <span
       data-testid={`rail-dot-${status}`}
-      className={`h-2 w-2 flex-none rounded-full ${dotClass(status)}`}
+      className={`mt-1.5 h-2 w-2 flex-none rounded-full ${dotClass(status)}`}
       aria-label={status}
     />
   );

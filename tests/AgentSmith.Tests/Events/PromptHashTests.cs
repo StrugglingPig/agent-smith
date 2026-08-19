@@ -1,3 +1,4 @@
+using AgentSmith.Infrastructure.Services.RateLimiting;
 using AgentSmith.Application.Services;
 using AgentSmith.Application.Services.Events;
 using AgentSmith.Contracts.Events;
@@ -67,7 +68,7 @@ public sealed class PromptHashTests
 
     private static EventPublishingChatClient NewClient(IEventPublisher publisher) =>
         new(new StubChat(), publisher, new ScopedRunContext("2026-05-27T12-00-00-cccc"),
-            new ModelPricingResolver());
+            new LlmCallCostCalculator(new ModelPricingResolver()), new ThrottleWaitReporter());
 
     private static Task CallAsync(EventPublishingChatClient client, string prompt) =>
         client.GetResponseAsync(
@@ -94,6 +95,8 @@ public sealed class PromptHashTests
         public string? CurrentRunId => runId;
         public CallScope? CurrentCallScope => null;
         public IDisposable BeginScope(string id) => new NoOpScope();
+        public int? CurrentStepIndex => null;
+        public IDisposable BeginStepScope(int stepIndex) => new NoOpScope();
         public IDisposable BeginCallScope(string role, string phase, string? repoName = null) => new NoOpScope();
         private sealed class NoOpScope : IDisposable { public void Dispose() { } }
     }

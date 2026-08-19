@@ -1,3 +1,4 @@
+using AgentSmith.Tests.TestSupport;
 using AgentSmith.Contracts.Events;
 using RunEvent = AgentSmith.Contracts.Events.RunEvent;
 using AgentSmith.Infrastructure.Persistence;
@@ -21,10 +22,7 @@ public sealed class RunBudgetResolvedTests : IDisposable
 
     public RunBudgetResolvedTests()
     {
-        _connection = new SqliteConnection("Data Source=:memory:");
-        _connection.Open();
-        using var ctx = new AgentSmithDbContext(Options());
-        ctx.Database.Migrate();
+        _connection = MigratedStoreTemplate.OpenCopy();
     }
 
     public void Dispose() => _connection.Dispose();
@@ -86,7 +84,7 @@ public sealed class RunBudgetResolvedTests : IDisposable
     }
 
     private Task ApplyAsync(RunEvent ev) =>
-        new RunEventApplier().ApplyAsync(new AgentSmithDbContext(Options()), ev, CancellationToken.None);
+        new RunEventApplier(new(), new(), new(), new(), new(), new(), new()).ApplyAsync(new AgentSmithDbContext(Options()), ev, CancellationToken.None);
 
     private DbContextOptions<AgentSmithDbContext> Options() =>
         new DbContextOptionsBuilder<AgentSmithDbContext>().UseSqlite(_connection).Options;

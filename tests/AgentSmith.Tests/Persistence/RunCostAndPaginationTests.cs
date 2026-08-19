@@ -1,3 +1,4 @@
+using AgentSmith.Tests.TestSupport;
 using AgentSmith.Contracts.Events;
 using AgentSmith.Infrastructure.Persistence;
 using AgentSmith.Infrastructure.Persistence.Contracts;
@@ -23,10 +24,7 @@ public sealed class RunCostAndPaginationTests : IDisposable
 
     public RunCostAndPaginationTests()
     {
-        _connection = new SqliteConnection("Data Source=:memory:");
-        _connection.Open();
-        using var ctx = new AgentSmithDbContext(Options());
-        ctx.Database.Migrate();
+        _connection = MigratedStoreTemplate.OpenCopy();
     }
 
     public void Dispose() => _connection.Dispose();
@@ -38,6 +36,13 @@ public sealed class RunCostAndPaginationTests : IDisposable
     {
         var services = new ServiceCollection();
         services.AddScoped<IUnitOfWork>(_ => new AgentSmithDbContext(Options()));
+        services.AddSingleton<AgentSmith.Infrastructure.Persistence.Services.RunCheckpointProjection>();
+        services.AddSingleton<AgentSmith.Infrastructure.Persistence.Services.RunExpectationProjection>();
+        services.AddSingleton<AgentSmith.Infrastructure.Persistence.Services.QueuedRunProjection>();
+        services.AddSingleton<AgentSmith.Infrastructure.Persistence.Services.RunSandboxProjection>();
+        services.AddSingleton<AgentSmith.Infrastructure.Persistence.Services.RunStepTimeProjection>();
+        services.AddSingleton<AgentSmith.Infrastructure.Persistence.Services.RunPullRequestProjection>();
+        services.AddSingleton<AgentSmith.Infrastructure.Persistence.Services.RunClassificationProjection>();
         services.AddSingleton<RunEventApplier>();
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<RunDbProjector>();

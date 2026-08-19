@@ -3,7 +3,9 @@ using AgentSmith.Contracts.Services;
 using AgentSmith.Infrastructure.Services.Factories;
 using AgentSmith.Infrastructure.Services.Factories.ChatClientBuilders;
 using AgentSmith.Infrastructure.Services.RateLimiting;
+using AgentSmith.Infrastructure.Services.Workers;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace AgentSmith.Infrastructure.Services.Providers.Agent;
 
@@ -28,7 +30,15 @@ public static class AgentProviderExtensions
         services.AddSingleton<IChatClientBuilder, OpenAiChatClientBuilder>();
         services.AddSingleton<IChatClientBuilder, GeminiChatClientBuilder>();
         services.AddSingleton<IChatClientBuilder, OllamaChatClientBuilder>();
+        // p0416: the external-worker bridge — an agent CLI answers the model calls.
+        // Registered always, selected only by an agent whose type says so.
+        services.AddExternalWorkerBridge();
         services.AddSingleton<ILlmRateLimiterRegistry, LlmRateLimiterRegistry>();
+        // p0401: the throttle-wait box the limiter fills and the event emitter reads.
+        services.AddSingleton<RateLimiting.ThrottleWaitReporter>();
+        // p0427: the factory records a traced run's conversation, so the writer must exist
+        // wherever the factory does. The null default keeps an untraced graph free.
+        services.TryAddSingleton<Contracts.Runs.IRunTraceWriter, Contracts.Runs.NullRunTraceWriter>();
         services.AddSingleton<IChatClientFactory, ChatClientFactory>();
         services.AddSingleton<LoopLimitsConfig>(_ => new LoopLimitsConfig());
         return services;

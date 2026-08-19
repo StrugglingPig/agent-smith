@@ -23,7 +23,11 @@ namespace AgentSmith.Application.Services.Triggers;
 /// so the existing pipeline-from-label / default-pipeline / global-fallback chain stays
 /// authoritative. The resolver itself is project-only.
 /// </summary>
-public sealed class ProjectResolver(ILogger<ProjectResolver>? logger = null) : IEnvelopeProjectResolver
+public sealed class ProjectResolver(
+    AgentSmithMetrics metrics,
+    PipelineResolver pipelineResolver,
+    ILogger<ProjectResolver>? logger = null, IStartupFindings? findings = null)
+    : IEnvelopeProjectResolver
 {
     public IReadOnlyList<ProjectMatch> Resolve(AgentSmithConfig config, IncomingTicketEnvelope envelope)
     {
@@ -32,6 +36,7 @@ public sealed class ProjectResolver(ILogger<ProjectResolver>? logger = null) : I
         {
             foreach (var (kind, trigger) in EnumerateTriggers(project))
             {
+                if (IsBlocked(projectName, kind)) continue;
                 if (!Matches(trigger, project, envelope))
                 {
                     // Per-project drop reason — so an empty match set is explained ticket-by-ticket.
@@ -50,7 +55,7 @@ public sealed class ProjectResolver(ILogger<ProjectResolver>? logger = null) : I
                 // maps the framework-owned label). Everything else keeps today's routing.
                 var pipeline = HasPhaseLabel(envelope)
                     ? PipelinePresets.PhaseExecutionName
-                    : PipelineResolver.Resolve(
+                    : pipelineResolver.Resolve(
                         trigger, envelope.Labels, config.PipelineTriggers, logger as ILogger);
 
                 if (string.IsNullOrEmpty(pipeline))
@@ -73,11 +78,26 @@ public sealed class ProjectResolver(ILogger<ProjectResolver>? logger = null) : I
         return matches;
     }
 
-    private static void EmitAmbiguousMetric(IReadOnlyList<ProjectMatch> matches)
+    // p0391a: a trigger carrying a blocking startup finding is not started — a run it
+    // spawned could not complete the thing the finding names (park a question, terminalize
+    // a ticket) and would loop. Both the webhook dispatch and the poller's claim path
+    // resolve through here, so the trigger is refused, never the process.
+    private bool IsBlocked(string projectName, string matchKind)
+    {
+        if (findings is null) return false;
+        var reason = findings.BlockingReason(projectName, TriggerKinds.ForMatchKind(matchKind));
+        if (reason is null) return false;
+        logger?.LogWarning(
+            "ProjectResolver: project '{Project}' {Kind} is disabled by a startup finding — {Reason}",
+            projectName, matchKind, reason);
+        return true;
+    }
+
+    private void EmitAmbiguousMetric(IReadOnlyList<ProjectMatch> matches)
     {
         if (matches.Count <= 1) return;
         foreach (var m in matches)
-            AgentSmithMeter.AmbiguousResolution.Add(1,
+            metrics.AmbiguousResolution.Add(1,
                 new KeyValuePair<string, object?>("project", m.ProjectName),
                 new KeyValuePair<string, object?>("pipeline", m.PipelineName));
     }

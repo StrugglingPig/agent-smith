@@ -71,17 +71,30 @@ public sealed class SetupRegistryAuthHandler(
         AgentConfig AgentFactory() => context.Pipeline.Resolved().Agent;
 
         var totalApplied = 0;
+        var staged = new List<string>();
         foreach (var (repoKey, sandbox) in sandboxes)
         {
-            totalApplied += await StageInSandboxAsync(repoKey, sandbox, AgentFactory, cancellationToken);
+            var written = new List<string>();
+            totalApplied += await StageInSandboxAsync(
+                repoKey, sandbox, AgentFactory, written, cancellationToken);
+            // Reported from what was WRITTEN, per ecosystem — never a path this code
+            // assumed. A .NET config named to an npm repo is worse than saying nothing.
+            staged.AddRange(written.Select(w => $"{repoKey}: {w}"));
         }
 
+        // p0422: the master never learned what was provisioned FOR it, so it formed its
+        // own theory — run 22 skipped every private-feed package and wrote "no credentials
+        // in sandbox" into decisions.md without ever trying. Credentials were staged; the
+        // build had used them. A fact the framework holds must reach the agent that acts
+        // on it, or the agent invents one.
+        context.Pipeline.Set(ContextKeys.StagedRegistries, staged);
         return CommandResult.Ok(
             $"Registry auth staged: {totalApplied} credential(s) across {sandboxes.Count} sandbox(es).");
     }
 
     private async Task<int> StageInSandboxAsync(
-        string repoKey, ISandbox sandbox, Func<AgentConfig> agentFactory, CancellationToken ct)
+        string repoKey, ISandbox sandbox, Func<AgentConfig> agentFactory,
+        List<string> written, CancellationToken ct)
     {
         var reader = readerFactory.Create(sandbox);
         var listing = await reader.ListAsync(WorkRoot, maxDepth: 6, ct);
@@ -93,6 +106,8 @@ public sealed class SetupRegistryAuthHandler(
         if (nugetMatches.Count > 0)
         {
             await reader.WriteAsync(UserNuGetConfigPath, BuildNuGetUserConfig(nugetMatches), ct);
+            written.Add($"{UserNuGetConfigPath} — "
+                + string.Join(", ", nugetMatches.Select(m => m.Registry.Host).Distinct()));
             logger.LogInformation(
                 "{Repo}: staged {Count} NuGet credential(s) at {Path}: [{Sources}]",
                 repoKey, nugetMatches.Count, UserNuGetConfigPath,
@@ -107,6 +122,8 @@ public sealed class SetupRegistryAuthHandler(
         if (npmMatches.Count > 0)
         {
             await reader.WriteAsync(UserNpmrcPath, BuildNpmrc(npmMatches), ct);
+            written.Add($"{UserNpmrcPath} — "
+                + string.Join(", ", npmMatches.Select(m => m.Registry.Host).Distinct()));
             logger.LogInformation(
                 "{Repo}: staged {Count} npm credential(s) at {Path}.",
                 repoKey, npmMatches.Count, UserNpmrcPath);
@@ -124,8 +141,13 @@ public sealed class SetupRegistryAuthHandler(
         var coveredHosts = nugetMatches.Select(m => m.Registry.Host)
             .Concat(npmMatches.Select(m => m.Registry.Host))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        staged += await genericApplier.ApplyAsync(
+        // p0422: every ecosystem beyond the two fast paths — cargo, maven, pip, go and
+        // whatever comes next — is staged HERE, so this is where they are reported. The
+        // fast paths are an optimisation, not the list of ecosystems that exist.
+        var generic = await genericApplier.ApplyAsync(
             repoKey, sandbox, reader, listing, coveredHosts, agentFactory, ct);
+        staged += generic.Count;
+        written.AddRange(generic.Select(file => $"{file.Path} — staged by the generic path"));
 
         return staged;
     }
@@ -148,8 +170,17 @@ public sealed class SetupRegistryAuthHandler(
         foreach (var path in configs)
         {
             var content = await reader.TryReadAsync(path, ct);
-            if (string.IsNullOrEmpty(content)) continue;
-            foreach (var (sourceName, sourceUrl) in TryParseNuGetSources(content, path, repoKey))
+            if (string.IsNullOrEmpty(content))
+            {
+                logger.LogWarning("{Repo}: nuget config '{Path}' read back empty — no sources from it.",
+                    repoKey, path);
+                continue;
+            }
+            var sources = PackageSourceParser.NuGetSources(content, out var problem);
+            if (problem is not null)
+                logger.LogWarning("{Repo}: '{Path}' is not readable as XML ({Reason}) — "
+                    + "no sources taken from it.", repoKey, path, problem);
+            foreach (var (sourceName, sourceUrl) in sources)
             {
                 var reg = FindMatchingRegistry(sourceUrl);
                 if (reg is null)
@@ -185,7 +216,7 @@ public sealed class SetupRegistryAuthHandler(
         {
             var content = await reader.TryReadAsync(path, ct);
             if (string.IsNullOrEmpty(content)) continue;
-            foreach (var (registryKey, registryUrl) in TryParseNpmRegistries(content))
+            foreach (var (registryKey, registryUrl) in PackageSourceParser.NpmRegistries(content))
             {
                 var reg = FindMatchingRegistry(registryUrl);
                 if (reg is null)
@@ -213,45 +244,6 @@ public sealed class SetupRegistryAuthHandler(
             if (host.EndsWith("." + reg.Host, StringComparison.OrdinalIgnoreCase)) return reg;
         }
         return null;
-    }
-
-    private static IEnumerable<(string Name, string Url)> TryParseNuGetSources(
-        string content, string path, string repoKey)
-    {
-        XDocument doc;
-        try { doc = XDocument.Parse(content); }
-        catch { yield break; }
-        var ns = doc.Root?.Name.Namespace ?? XNamespace.None;
-        var sources = doc.Descendants(ns + "packageSources")
-            .Elements(ns + "add")
-            .Where(e => !string.Equals(
-                (string?)e.Attribute("key"), "clear", StringComparison.OrdinalIgnoreCase));
-        foreach (var e in sources)
-        {
-            var name = (string?)e.Attribute("key");
-            var url = (string?)e.Attribute("value");
-            if (!string.IsNullOrEmpty(name) && !string.IsNullOrEmpty(url))
-                yield return (name, url);
-        }
-    }
-
-    private static IEnumerable<(string Key, string Url)> TryParseNpmRegistries(string content)
-    {
-        foreach (var rawLine in content.Split('\n'))
-        {
-            var line = rawLine.Trim();
-            if (line.Length == 0 || line.StartsWith('#') || line.StartsWith(';')) continue;
-            var idx = line.IndexOf('=');
-            if (idx <= 0) continue;
-            var key = line[..idx].Trim();
-            var value = line[(idx + 1)..].Trim();
-            // Match `registry=...` and `@scope:registry=...` lines.
-            if (string.Equals(key, "registry", StringComparison.OrdinalIgnoreCase)
-                || key.EndsWith(":registry", StringComparison.OrdinalIgnoreCase))
-            {
-                yield return (key, value);
-            }
-        }
     }
 
     private static IReadOnlyList<NugetMatch> DedupBySource(IEnumerable<NugetMatch> matches)

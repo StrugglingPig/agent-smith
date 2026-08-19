@@ -53,7 +53,7 @@ public sealed class WriteRunResultInitProjectTests
             });
         _sut = new WriteRunResultHandler(factory.Object, _dialogueTrail, new InMemoryRunArtifactStore(), new AgentSmith.Tests.Events.RecordingEventPublisher(),
             new AgentSmith.Application.Services.Memory.RunNarrativeMemoryWriter(NullLogger<AgentSmith.Application.Services.Memory.RunNarrativeMemoryWriter>.Instance),
-            NullLogger<WriteRunResultHandler>.Instance);
+            new SandboxTargets(), NullLogger<WriteRunResultHandler>.Instance);
     }
 
     [Fact]
@@ -174,7 +174,7 @@ public sealed class WriteRunResultInitProjectTests
         var pipeline = new PipelineContext();
         pipeline.Set(ContextKeys.RunId, SampleRunId);
         pipeline.Set(ContextKeys.ResolvedPipeline, new ResolvedPipelineConfig(
-            "init-project", new AgentConfig(), "skills/coding", null));
+            "init-project", new AgentConfig(), "skills", null));
         pipeline.Set<IReadOnlyList<RepoConnection>>(
             ContextKeys.Repos, repos.Select(r => new RepoConnection { Name = r, Url = "https://x/y.git", Auth = "test" }).ToList());
         pipeline.Set<IReadOnlyDictionary<string, ISandbox>>(

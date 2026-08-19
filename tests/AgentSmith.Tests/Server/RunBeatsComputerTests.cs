@@ -21,10 +21,12 @@ public sealed class RunBeatsComputerTests
     [Fact]
     public void FinishedFixBugRun_AllStepsOk_TicketPlanBuildingOutcomeDone_VerifySkipped()
     {
+        // p0394a: "GeneratePlanCommand" is a retired step kept by literal name —
+        // this run record shape is exactly what pre-p0394a runs persisted.
         var run = TerminalRun("fix-bug", "success", Steps(
             ("s", CommandNames.LoadCatalog), ("s", CommandNames.FetchTicket),
             ("s", CommandNames.CheckoutSource), ("s", CommandNames.AnalyzeCode),
-            ("s", CommandNames.GeneratePlan), ("s", CommandNames.Approval),
+            ("s", "GeneratePlanCommand"), ("s", CommandNames.Approval),
             ("s", CommandNames.AgenticMaster), ("s", CommandNames.WriteRunResult),
             ("s", CommandNames.CommitAndPR)));
 
@@ -33,8 +35,27 @@ public sealed class RunBeatsComputerTests
         beats.Ticket.Should().Be(BeatStates.Done);
         beats.Plan.Should().Be(BeatStates.Done);
         beats.Building.Should().Be(BeatStates.Done);
-        beats.Verify.Should().Be(BeatStates.Skipped, "the fix-bug preset has no verify-beat command");
+        beats.Verify.Should().Be(BeatStates.Skipped, "these steps contain no verify-beat command");
         beats.Outcome.Should().Be(BeatStates.Done);
+    }
+
+    [Fact]
+    public void OldRunRecords_WithPlanSteps_StillRender()
+    {
+        // p0394a retired GeneratePlan/PlanOpenQuestions from the phase path, but run
+        // records persisted before the retirement still carry these steps — their
+        // beats and trail labels must keep rendering, keyed by literal name.
+        var run = TerminalRun("fix-bug", "success", Steps(
+            ("s", CommandNames.FetchTicket),
+            ("s", "GeneratePlanCommand"), ("s", "PlanOpenQuestionsCommand"),
+            ("s", CommandNames.AgenticMaster), ("s", CommandNames.CommitAndPR)));
+
+        var beats = RunBeatsComputer.Compute(run)!;
+
+        beats.Plan.Should().Be(BeatStates.Done, "the retired steps keep their plan beat");
+        CommandDisplayNames.Get("GeneratePlanCommand").Should().Be("Generate plan");
+        CommandDisplayNames.Get("PlanOpenQuestionsCommand").Should().Be("Post Plan open questions");
+        CommandNames.GetLabel("GeneratePlanCommand").Should().Be("Generating plan");
     }
 
     // p0376: a coding pipeline verifies inside the master + keystone (no verify command),
@@ -79,7 +100,7 @@ public sealed class RunBeatsComputerTests
         var beats = RunBeatsComputer.Compute(run)!;
 
         beats.Verify.Should().Be(BeatStates.Skipped,
-            "an unproven criterion means verification is not fully proven — no fabricated green");
+            "p0393 gave `code` a real VerifyPhase beat");
     }
 
     // p0344b spec test: Beats_FailedStep_MarksItsBeatFailed_LaterBeatsPending
@@ -89,14 +110,14 @@ public sealed class RunBeatsComputerTests
         var run = TerminalRun("fix-bug", "failed", Steps(
             ("s", CommandNames.LoadCatalog), ("s", CommandNames.FetchTicket),
             ("s", CommandNames.CheckoutSource), ("s", CommandNames.AnalyzeCode),
-            ("f", CommandNames.GeneratePlan)));
+            ("f", "GeneratePlanCommand")));
 
         var beats = RunBeatsComputer.Compute(run)!;
 
         beats.Ticket.Should().Be(BeatStates.Done);
         beats.Plan.Should().Be(BeatStates.Failed, "the failed step's beat is the failure point");
         beats.Building.Should().Be(BeatStates.Done, "AnalyzeCode completed before the plan failed — honest, not narrative-smoothed");
-        beats.Verify.Should().Be(BeatStates.Skipped, "the preset never runs a verify-beat command");
+        beats.Verify.Should().Be(BeatStates.Pending, "p0393 gave `code` a real VerifyPhase beat");
         beats.Outcome.Should().Be(BeatStates.Pending, "the story stopped before shipping");
     }
 
@@ -106,7 +127,7 @@ public sealed class RunBeatsComputerTests
         var run = ActiveRun("fix-bug", Steps(
             ("s", CommandNames.LoadCatalog), ("s", CommandNames.FetchTicket),
             ("s", CommandNames.CheckoutSource), ("s", CommandNames.AnalyzeCode),
-            ("s", CommandNames.GeneratePlan), ("s", CommandNames.Approval),
+            ("s", "GeneratePlanCommand"), ("s", CommandNames.Approval),
             ("r", CommandNames.AgenticMaster)));
 
         var beats = RunBeatsComputer.Compute(run)!;
@@ -114,7 +135,7 @@ public sealed class RunBeatsComputerTests
         beats.Ticket.Should().Be(BeatStates.Done);
         beats.Plan.Should().Be(BeatStates.Done);
         beats.Building.Should().Be(BeatStates.Active, "the run is inside the master step");
-        beats.Verify.Should().Be(BeatStates.Skipped);
+        beats.Verify.Should().Be(BeatStates.Pending);
         beats.Outcome.Should().Be(BeatStates.Pending);
     }
 
@@ -143,7 +164,7 @@ public sealed class RunBeatsComputerTests
         beats.Ticket.Should().Be(BeatStates.Pending);
         beats.Plan.Should().Be(BeatStates.Pending);
         beats.Building.Should().Be(BeatStates.Pending);
-        beats.Verify.Should().Be(BeatStates.Skipped, "the preset contains no verify-beat command");
+        beats.Verify.Should().Be(BeatStates.Pending, "p0393 gave `code` a real VerifyPhase beat");
         beats.Outcome.Should().Be(BeatStates.Pending);
     }
 

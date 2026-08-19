@@ -251,6 +251,33 @@ public sealed class AzureReposSourceProvider(
         }
     }
 
+    // p0390: the same search the already-exists path uses, exposed so CommitAndPR
+    // can reuse the draft PR the work-spec commit already opened on this branch.
+    public async Task<string?> FindOpenPullRequestAsync(
+        Repository repository, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(repository);
+        try
+        {
+            var client = await CreateConnectionAsync(cancellationToken);
+            var target = await GetDefaultBranchAsync(cancellationToken);
+            var criteria = new GitPullRequestSearchCriteria
+            {
+                SourceRefName = $"refs/heads/{repository.CurrentBranch.Value}",
+                TargetRefName = $"refs/heads/{target}",
+                Status = PullRequestStatus.Active,
+            };
+            var existing = (await client.GetPullRequestsAsync(
+                _project, _repoName, criteria, cancellationToken: cancellationToken)).FirstOrDefault();
+            return existing is null ? null : BuildPrUrl(existing.PullRequestId);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "PR lookup for branch {Branch} failed", repository.CurrentBranch);
+            return null;
+        }
+    }
+
     private async Task<string> FindExistingPrUrlAsync(
         GitHttpClient client, string src, string tgt, CancellationToken cancellationToken)
     {
@@ -288,6 +315,27 @@ public sealed class AzureReposSourceProvider(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Failed to update PR body for !{PrId}", prId);
+            return false;
+        }
+    }
+
+    // p0393a: Azure DevOps takes a pull request out of draft with the same update call
+    // that sets the description.
+    public async Task<bool> MarkPullRequestReadyAsync(string prUrl, CancellationToken cancellationToken)
+    {
+        if (!TryParsePullRequestId(prUrl, out var prId)) return false;
+        try
+        {
+            var client = CreateGitClient();
+            await client.UpdatePullRequestAsync(
+                new GitPullRequest { IsDraft = false },
+                _project, _repoName, prId, cancellationToken: cancellationToken);
+            logger.LogInformation("PR !{PrId} is out of draft — the sequence completed", prId);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to mark PR !{PrId} ready for review", prId);
             return false;
         }
     }

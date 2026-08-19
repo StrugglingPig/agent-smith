@@ -1,5 +1,6 @@
 using System.Text.Json;
 using AgentSmith.Contracts.Events;
+using AgentSmith.Contracts.Runs;
 using AgentSmith.Infrastructure.Persistence;
 using AgentSmith.Infrastructure.Persistence.Contracts;
 using AgentSmith.Infrastructure.Services.Events;
@@ -78,7 +79,7 @@ public sealed class TrailReaderTests : IDisposable
             new StepStartedEvent(_runId, 1, "CheckoutSource", 10, DateTimeOffset.UtcNow),
             new RunFinishedEvent(_runId, "success", null, "ok", DateTimeOffset.UtcNow));
 
-        var sut = new TrailReader(_redis.Object, _scopes);
+        var sut = new TrailReader(_redis.Object, _scopes, new AgentSmith.Infrastructure.Services.Events.EventEnvelopeSerializer());
         var result = await sut.ReadAllTypedAsync(_runId);
 
         result.Select(e => e.Type).Should().ContainInOrder(
@@ -99,12 +100,44 @@ public sealed class TrailReaderTests : IDisposable
             new StepStartedEvent(_runId, 2, "AnalyzeCode", 20, DateTimeOffset.UtcNow),
             new RunFinishedEvent(_runId, "success", null, "ok", DateTimeOffset.UtcNow));
 
-        var sut = new TrailReader(_redis.Object, _scopes);
+        var sut = new TrailReader(_redis.Object, _scopes, new AgentSmith.Infrastructure.Services.Events.EventEnvelopeSerializer());
         var result = await sut.ReadDbTrailTypedAsync(_runId);
 
         // All 4 DB rows (not the single Redis entry) come back, ordered by Seq.
         result.Select(e => e.Type).Should().ContainInOrder(
             EventType.RunStarted, EventType.StepStarted, EventType.StepStarted, EventType.RunFinished);
+    }
+
+    [Fact]
+    public async Task Trail_LedgerTransitions_AreReadable()
+    {
+        // p0374a: the ledger snapshot on the run row is overwritten by every flush, so
+        // history lives on the trail. Prove it round-trips: projected as a raw row by
+        // the generic applier path, read back as the TYPED event with its transitions
+        // intact — entry, from-state, to-state, cause and pass.
+        StubEmptyRedis();
+        var transitions = new List<LedgerTransitionView>
+        {
+            new("3", "migrate the call sites", "done", "done", LedgerTransitionCauses.RegressionRefused, 2),
+            new("4", "update the docs", null, "pending", LedgerTransitionCauses.Added, 2),
+        };
+        SeedDbTrail(
+            new RunStartedEvent(_runId, "ticket", "code", new[] { "server" }, DateTimeOffset.UtcNow),
+            new LedgerTransitionsRecordedEvent(
+                _runId, RunStoryJson.Serialize(transitions), DateTimeOffset.UtcNow));
+
+        var sut = new TrailReader(_redis.Object, _scopes, new AgentSmith.Infrastructure.Services.Events.EventEnvelopeSerializer());
+        var result = await sut.ReadDbTrailTypedAsync(_runId);
+
+        var recorded = result.OfType<LedgerTransitionsRecordedEvent>().Should().ContainSingle().Subject;
+        var read = RunStoryJson.TryDeserialize<List<LedgerTransitionView>>(recorded.TransitionsJson);
+        read.Should().HaveCount(2);
+        read![0].Cause.Should().Be(LedgerTransitionCauses.RegressionRefused);
+        read[0].From.Should().Be("done");
+        read[0].To.Should().Be("done");
+        read[0].Pass.Should().Be(2);
+        read[1].From.Should().BeNull("an added entry has no prior state");
+        read[1].Cause.Should().Be(LedgerTransitionCauses.Added);
     }
 
     [Fact]
@@ -125,7 +158,7 @@ public sealed class TrailReaderTests : IDisposable
                 (RedisKey)EventStreamKeys.RunStream(_runId), "-", "+", null, Order.Ascending, CommandFlags.None))
             .ReturnsAsync(entries);
 
-        var sut = new TrailReader(_redis.Object, _scopes);
+        var sut = new TrailReader(_redis.Object, _scopes, new AgentSmith.Infrastructure.Services.Events.EventEnvelopeSerializer());
         var result = await sut.ReadStructuralTrailAsync(_runId);
 
         result.Cast<RunEvent>().Select(e => e.Type).Should().Equal(
@@ -140,7 +173,7 @@ public sealed class TrailReaderTests : IDisposable
             new RunStartedEvent(_runId, "ticket", "fix-bug", new[] { "server" }, DateTimeOffset.UtcNow),
             new StepStartedEvent(_runId, 1, "CheckoutSource", 10, DateTimeOffset.UtcNow));
 
-        var sut = new TrailReader(_redis.Object, _scopes);
+        var sut = new TrailReader(_redis.Object, _scopes, new AgentSmith.Infrastructure.Services.Events.EventEnvelopeSerializer());
         var result = await sut.ReadStructuralTrailAsync(_runId);
 
         result.Cast<RunEvent>().Select(e => e.Type).Should().Equal(
@@ -161,7 +194,7 @@ public sealed class TrailReaderTests : IDisposable
             (RedisKey)EventStreamKeys.RunStream(_runId), "-", "+", null, Order.Ascending, CommandFlags.None))
             .ReturnsAsync(entries);
 
-        var sut = new TrailReader(_redis.Object, _scopes);
+        var sut = new TrailReader(_redis.Object, _scopes, new AgentSmith.Infrastructure.Services.Events.EventEnvelopeSerializer());
         var result = await sut.ReadAllTypedAsync(_runId);
 
         result.Should().HaveCount(3);
@@ -176,7 +209,7 @@ public sealed class TrailReaderTests : IDisposable
             (RedisKey)EventStreamKeys.RunStream(_runId), "-", "+", null, Order.Ascending, CommandFlags.None))
             .ReturnsAsync(Array.Empty<StreamEntry>());
 
-        var sut = new TrailReader(_redis.Object, _scopes);
+        var sut = new TrailReader(_redis.Object, _scopes, new AgentSmith.Infrastructure.Services.Events.EventEnvelopeSerializer());
         var result = await sut.ReadAllTypedAsync(_runId);
 
         result.Should().BeEmpty();
@@ -190,7 +223,7 @@ public sealed class TrailReaderTests : IDisposable
             It.IsAny<int?>(), It.IsAny<Order>(), It.IsAny<CommandFlags>()))
             .ReturnsAsync(Array.Empty<StreamEntry>());
 
-        var sut = new TrailReader(_redis.Object, _scopes);
+        var sut = new TrailReader(_redis.Object, _scopes, new AgentSmith.Infrastructure.Services.Events.EventEnvelopeSerializer());
         await sut.ReadPageAsync(_runId, fromId: null, count: 0);
 
         _db.Verify(d => d.StreamRangeAsync(
@@ -212,7 +245,7 @@ public sealed class TrailReaderTests : IDisposable
             Order.Ascending, CommandFlags.None))
             .ReturnsAsync(entries);
 
-        var sut = new TrailReader(_redis.Object, _scopes);
+        var sut = new TrailReader(_redis.Object, _scopes, new AgentSmith.Infrastructure.Services.Events.EventEnvelopeSerializer());
         var page = await sut.ReadPageAsync(_runId, fromId: null, count: 2);
 
         page.Events.Should().HaveCount(2);
@@ -232,7 +265,7 @@ public sealed class TrailReaderTests : IDisposable
             Order.Ascending, CommandFlags.None))
             .ReturnsAsync(entries);
 
-        var sut = new TrailReader(_redis.Object, _scopes);
+        var sut = new TrailReader(_redis.Object, _scopes, new AgentSmith.Infrastructure.Services.Events.EventEnvelopeSerializer());
         var page = await sut.ReadPageAsync(_runId, fromId: null, count: null);
 
         page.HasMore.Should().BeFalse();
@@ -248,7 +281,7 @@ public sealed class TrailReaderTests : IDisposable
             2001, Order.Ascending, CommandFlags.None))
             .ReturnsAsync(Array.Empty<StreamEntry>());
 
-        var sut = new TrailReader(_redis.Object, _scopes);
+        var sut = new TrailReader(_redis.Object, _scopes, new AgentSmith.Infrastructure.Services.Events.EventEnvelopeSerializer());
         await sut.ReadPageAsync(_runId, fromId: null, count: 999_999);
 
         _db.Verify(d => d.StreamRangeAsync(
@@ -258,7 +291,7 @@ public sealed class TrailReaderTests : IDisposable
 
     private static StreamEntry EntryFor(RunEvent evt, string id = "0-0")
     {
-        var payload = EventEnvelopeSerializer.Serialize(evt);
+        var payload = new AgentSmith.Infrastructure.Services.Events.EventEnvelopeSerializer().Serialize(evt);
         return new StreamEntry(id, new[] { new NameValueEntry("e", payload) });
     }
 }

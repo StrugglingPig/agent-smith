@@ -226,7 +226,8 @@ public sealed class BootstrapDiscoverHandlerTests
         var factory = new CannedChatClientFactory(chat);
         return new BootstrapDiscoverHandler(
             factory, dialogueTransport, EventTestStubs.RunContext,
-            NullLogger<BootstrapDiscoverHandler>.Instance);
+            new DiscoveryOutputParser(),
+            new SandboxTargets(), new AgentSmith.Application.Services.Tools.AgenticToolSurface(), NullLogger<BootstrapDiscoverHandler>.Instance);
     }
 
     private static BootstrapDiscoverContext NewContext(string repoName, PipelineContext pipeline)
@@ -236,7 +237,7 @@ public sealed class BootstrapDiscoverHandlerTests
     {
         var pipeline = new PipelineContext();
         pipeline.Set(ContextKeys.ResolvedPipeline, new ResolvedPipelineConfig(
-            "init-project", new AgentConfig(), "skills/coding", null));
+            "init-project", new AgentConfig(), "skills", null));
         pipeline.Set<IReadOnlyList<RepoConnection>>(
             ContextKeys.Repos, new[]
             {

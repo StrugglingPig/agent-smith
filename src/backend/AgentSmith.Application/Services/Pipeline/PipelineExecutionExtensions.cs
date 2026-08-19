@@ -44,8 +44,7 @@ public static class PipelineExecutionExtensions
         // / unit-test compositions stay quiet; Server composition overrides with
         // SandboxLivenessSupervisor in SandboxBackendRegistrations.
         services.AddTransient<ISandboxLivenessSupervisor, NoOpSandboxLivenessSupervisor>();
-        services.AddTransient<PipelineExecutor>();
-        services.AddTransient<IPipelineExecutor>(sp => sp.GetRequiredService<PipelineExecutor>());
+        services.AddPipelineExecutor();
         // p0327: durable dialogue — the hybrid ask gate, checkpoint writer,
         // context (de)serializer, resume reader, and the queue-riding resumer.
         services.AddTransient<IPipelineContextSerializer, Resume.PipelineContextSerializer>();
@@ -61,19 +60,14 @@ public static class PipelineExecutionExtensions
         // p0356: the sandbox toolchain probe feeding the master's capability line.
         services.AddTransient<ISandboxToolchainProbe, SandboxToolchainProbe>();
         services.TryAddSingleton<ICapacityQueue, Spawning.NoOpCapacityQueue>();
-        services.AddSingleton<IPhaseDataFlow, FixBugDataFlow>();
-        services.AddSingleton<IPhaseDataFlow, FixNoTestDataFlow>();
-        services.AddSingleton<IPhaseDataFlow, AddFeatureDataFlow>();
+        services.AddSingleton<IPhaseDataFlow, CodeDataFlow>(); // p0393
         services.AddSingleton<IPhaseDataFlow, InitProjectDataFlow>();
         services.AddSingleton<IPhaseDataFlow, SecurityScanDataFlow>();
         services.AddSingleton<IPhaseDataFlow, ApiSecurityScanDataFlow>();
         services.AddSingleton<IPhaseDataFlow, MadDiscussionDataFlow>();
         services.AddSingleton<IPhaseDataFlow, LegalAnalysisDataFlow>();
-        services.AddSingleton<IPhaseDataFlow, SkillManagerDataFlow>();
-        services.AddSingleton<IPhaseDataFlow, AutonomousDataFlow>();
         services.AddSingleton<IPhaseDataFlow, PrReviewDataFlow>();
         services.AddSingleton<IPhaseDataFlow, SpecDialogDataFlow>();
-        services.AddSingleton<IPhaseDataFlow, PhaseExecutionDataFlow>();
         services.AddSingleton<IPhaseDataFlowResolver, PhaseDataFlowResolver>();
         services.AddOptions<PipelineDataFlowConfig>().Configure<AgentSmithConfig>(
             (opts, config) => opts.Enforce = config.PipelineDataFlow.Enforce);
@@ -101,6 +95,9 @@ public static class PipelineExecutionExtensions
         services.AddTransient<ISandboxLanguageResolver, SandboxLanguageResolver>();
         services.AddTransient<ISourceConfigOverrider, SourceConfigOverrider>();
         services.AddSingleton<IPipelineConfigResolver, PipelineConfigResolver>();
+        // p0401: one meter per host, injected — the instrument set is a service, not
+        // a process-wide fact.
+        services.AddSingleton<Metrics.AgentSmithMetrics>();
         services.AddSingleton<ProjectResolver>();
         services.AddSingleton<IEnvelopeProjectResolver>(
             sp => sp.GetRequiredService<ProjectResolver>());

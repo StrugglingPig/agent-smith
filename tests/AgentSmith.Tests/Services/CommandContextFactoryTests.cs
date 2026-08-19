@@ -20,23 +20,15 @@ public class CommandContextFactoryTests
         new(CommandNames.LoadCodingPrinciples, new LoadCodingPrinciplesContextBuilder()),
         new(CommandNames.LoadContext, new LoadContextContextBuilder()),
         new(CommandNames.AnalyzeCode, new AnalyzeCodeContextBuilder()),
-        new(CommandNames.GeneratePlan, new GeneratePlanContextBuilder()),
         new(CommandNames.Approval, new ApprovalContextBuilder()),
-        new(CommandNames.AgenticExecute, new AgenticExecuteContextBuilder()),
         new(CommandNames.WriteRunResult, new WriteRunResultContextBuilder()),
         new(CommandNames.CommitAndPR, new CommitAndPRContextBuilder()),
         new(CommandNames.InitCommit, new InitCommitContextBuilder()),
-        new(CommandNames.Triage, new TriageContextBuilder()),
         new(CommandNames.SwitchSkill, new SwitchSkillContextBuilder()),
-        new(CommandNames.SkillRound, new SkillRoundContextBuilder()),
-        new(CommandNames.SecuritySkillRound, new SecuritySkillRoundContextBuilder()),
-        new(CommandNames.ConvergenceCheck, new ConvergenceCheckContextBuilder()),
         new(CommandNames.GenerateTests, new GenerateTestsContextBuilder()),
         new(CommandNames.GenerateDocs, new GenerateDocsContextBuilder()),
-        new(CommandNames.CompileDiscussion, new CompileDiscussionContextBuilder()),
         new(CommandNames.LoadSwagger, new LoadSwaggerContextBuilder()),
         new(CommandNames.SpawnNuclei, new SpawnNucleiContextBuilder()),
-        new(CommandNames.ApiSecuritySkillRound, new ApiSecuritySkillRoundContextBuilder()),
         new(CommandNames.CompileFindings, new CompileFindingsContextBuilder()),
         new(CommandNames.LoadSkills, new LoadSkillsContextBuilder()),
         new(CommandNames.DeliverFindings, new DeliverFindingsContextBuilder()),
@@ -72,34 +64,6 @@ public class CommandContextFactoryTests
         result.Should().BeOfType<CheckoutSourceContext>();
         var ctx = (CheckoutSourceContext)result;
         ctx.Branch!.Value.Should().Be("agent-smith/456");
-    }
-
-    [Fact]
-    public void Create_GeneratePlanCommand_PullsFromPipeline()
-    {
-        var project = CreateProjectConfig();
-        var pipeline = new PipelineContext();
-        pipeline.Set(ContextKeys.ResolvedPipeline, new ResolvedPipelineConfig(
-            "fix-bug", project.Agent, "skills/coding", project.CodingPrinciplesPath));
-        pipeline.Set(ContextKeys.Ticket, new Ticket(
-            new TicketId("1"), "Title", "Desc", null, "Open", "GitHub"));
-        // p0384: the per-repo dictionary is the only analysis surface.
-        pipeline.Set<IReadOnlyDictionary<string, ProjectMap>>(
-            ContextKeys.RepoProjectMaps,
-            new Dictionary<string, ProjectMap>(StringComparer.Ordinal)
-            {
-                ["default"] = new ProjectMap(
-                    "C#", [], [], [], [], new Conventions(null, null, null),
-                    new CiConfig(false, null, null, null)),
-            });
-        pipeline.Set(ContextKeys.CodingPrinciples, "principles");
-
-        var result = _sut.Create(PipelineCommand.Simple(CommandNames.GeneratePlan), project, pipeline);
-
-        result.Should().BeOfType<GeneratePlanContext>();
-        var ctx = (GeneratePlanContext)result;
-        ctx.Ticket.Title.Should().Be("Title");
-        ctx.CodingPrinciples.Should().Be("principles");
     }
 
     [Fact]

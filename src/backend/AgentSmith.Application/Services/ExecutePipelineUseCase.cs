@@ -158,7 +158,7 @@ public sealed class ExecutePipelineUseCase(
         }
 
         // p0128b: operator answers from a prior open-questions round-trip flow into
-        // the next Plan-skill run as a structured input block (PromptPrefixBuilder).
+        // the next run as a structured input block.
         if (request.PlanAnswers is { Count: > 0 })
             pipeline.Set(ContextKeys.PlanAnswers, request.PlanAnswers);
 
@@ -205,15 +205,20 @@ public sealed class ExecutePipelineUseCase(
                 "operator" => "Cancelled by operator.",
                 // p0237: the liveness watcher killed the run because the sandbox
                 // container exited mid-step (SandboxLivenessWatcher.CancelReason).
-                // The usual cause is the container being OOM-killed during a heavy
-                // build/test — name it so the operator checks memory, not an LLM
-                // timeout (which is what the in-flight LLM call's cancellation
-                // looks like, but isn't the cause).
+                // p0396: the watcher records the container's EXIT EVIDENCE
+                // (oomKilled/exitCode) as a detail next to the reason — use it
+                // verbatim instead of the old blanket "most often an OOM kill"
+                // guess, which sent the operator tuning memory limits for an
+                // agent crash (exit 3, a Redis client timeout). The fallback
+                // covers a vanish confirmed without inspect evidence (container
+                // already removed before the probe).
                 "sandbox-vanished" =>
-                    "The sandbox container exited mid-run (it vanished) — most often an "
-                    + "out-of-memory kill during a build/test. Check the sandbox container's "
-                    + "memory limit and whether the build needs a `restore` step first. The "
-                    + "'A task was cancelled' on the LLM call is a side effect, not the cause.",
+                    cancellationRegistry.TryGetDetail(runId, out var vanishDetail)
+                        ? vanishDetail
+                        : "The sandbox container exited mid-run (it vanished); its exit "
+                          + "evidence was unavailable — see the sandbox container and server "
+                          + "logs. The 'A task was cancelled' on the LLM call is a side "
+                          + "effect, not the cause.",
                 _ => string.IsNullOrWhiteSpace(cancelReason) ? "Cancelled." : $"Cancelled: {cancelReason}.",
             };
             var cancelStatus = ResolveCancelStatus(cancelReason);
@@ -308,8 +313,8 @@ public sealed class ExecutePipelineUseCase(
         // p0327: the ask gate checkpointed the run — a WAITING state, not a
         // terminal one. Like 'queued', the projector keeps FinishedAt null; the
         // worker task ends here and RunResumer re-enters when the answer lands.
-        if (result.IsSuccess
-            && pipeline.TryGet<bool>(ContextKeys.WaitingForInput, out var waiting) && waiting)
+        // p0440: EITHER park. A master question used to fall through to success.
+        if (result.IsSuccess && RunPark.IsWaitingForOperator(pipeline))
         {
             var waitingCost = PipelineCostTracker.GetOrCreate(pipeline).EstimateCostUsd();
             await PublishRunFinishedWithStatusAsync(

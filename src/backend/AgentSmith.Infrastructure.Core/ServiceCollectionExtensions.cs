@@ -18,6 +18,10 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddAgentSmithCore(this IServiceCollection services)
     {
         services.AddSingleton<SecretsProvider>();
+        // p0391a: the findings list every startup dependency and configuration rule
+        // records into instead of throwing. Singleton — it IS the installation's
+        // current "what is wrong" picture, read by the endpoint and the dashboard.
+        services.AddSingleton<IStartupFindings, StartupFindings>();
         services.AddSingleton<ProjectConfigNormalizer>();
         services.AddSingleton<EffectiveTriggerBuilder>();
         services.AddSingleton<DeploymentDefaultsApplier>();
@@ -45,11 +49,16 @@ public static class ServiceCollectionExtensions
         // p0349: the type<->model assembly map, shared by DbConfigStore + the
         // server's DB configuration loader; and the bootstrap reader that pulls
         // persistence + secret names from the file before the DB is reachable.
+        // p0392: what the server would say about an unsaved studio draft, from the
+        // server's own rule objects.
+        services.AddSingleton<Services.Configuration.Studio.ConfigDraftRules>();
         services.AddSingleton<ConfigDocumentAssembler>();
         services.AddSingleton<BootstrapConfigReader>();
         services.AddSingleton<ConceptVocabularyLoader>();
         services.AddSingleton<ConceptVocabularyValidator>();
-        services.AddSingleton<SkillIndexBuilder>();
+        // p0313b: the body resolver inlines a master's {{ref:<slug>}} citations from
+        // the catalog's references/ directory, so the shared methodology has one home.
+        services.AddSingleton<ISkillReferenceSource, CatalogSkillReferenceSource>();
         services.AddSingleton<ISkillBodyResolver, SkillBodyResolver>();
         // p0111d: provider-override plumbing. Default registration uses an empty
         // AgentSmithConfig (PrimaryProvider=null → no overrides). Composition roots
@@ -59,6 +68,12 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IActiveProviderResolver, ActiveProviderResolver>();
         services.AddSingleton<IProviderOverrideResolver, ProviderOverrideResolver>();
         services.AddSingleton<ISkillLoader, YamlSkillLoader>();
+        // p0403: the decision→event mapping is injected, not reached for statically.
+        services.AddSingleton<Services.DecisionEventMirror>();
+        // p0403: config codecs are services — one options/serializer instance per host.
+        services.AddSingleton<Services.Configuration.RawConfigYaml>();
+        services.AddSingleton<Services.Configuration.Studio.ConfigDocJson>();
+        services.AddSingleton<Services.Configuration.Studio.ConfigYamlExporter>();
         services.AddSingleton<IDecisionLogger, FileDecisionLogger>();
 
         services.AddSingleton<IAgentSmithPaths, AgentSmithPaths>();

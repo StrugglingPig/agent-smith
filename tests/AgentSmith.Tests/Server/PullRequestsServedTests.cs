@@ -1,3 +1,4 @@
+using AgentSmith.Tests.TestSupport;
 using System.Text.Json;
 using AgentSmith.Contracts.Events;
 using AgentSmith.Infrastructure.Persistence;
@@ -28,10 +29,7 @@ public sealed class PullRequestsServedTests : IDisposable
 
     public PullRequestsServedTests()
     {
-        _connection = new SqliteConnection("Data Source=:memory:");
-        _connection.Open();
-        using var ctx = new AgentSmithDbContext(Options());
-        ctx.Database.Migrate();
+        _connection = MigratedStoreTemplate.OpenCopy();
     }
 
     public void Dispose() => _connection.Dispose();
@@ -170,7 +168,7 @@ public sealed class PullRequestsServedTests : IDisposable
 
     private async Task ApplyAsync(params AgentSmith.Contracts.Events.RunEvent[] events)
     {
-        var applier = new RunEventApplier();
+        var applier = new RunEventApplier(new(), new(), new(), new(), new(), new(), new());
         foreach (var ev in events)
         {
             await using var uow = new AgentSmithDbContext(Options());

@@ -1,6 +1,7 @@
 using AgentSmith.Tests.TestHelpers;
 using AgentSmith.Contracts.Services;
 using AgentSmith.Application.Services;
+using AgentSmith.Application.Services.Sandbox;
 using AgentSmith.Contracts.Models.Configuration;
 using AgentSmith.Contracts.Sandbox;
 using AgentSmith.Sandbox.Wire;
@@ -14,7 +15,10 @@ public sealed class SandboxGitOperationsTests
 {
     private readonly Mock<ISandbox> _sandboxMock = new();
     private readonly List<Step> _steps = new();
-    private readonly SandboxGitOperations _sut = new(NullLogger<SandboxGitOperations>.Instance, new StubSandboxFileReaderFactory());
+    private readonly SandboxGitOperations _sut = new(
+        new GitBranchPusher(),
+        NullLogger<SandboxGitOperations>.Instance, new StubSandboxFileReaderFactory(),
+        new SandboxGitIdentity(NullLogger<SandboxGitIdentity>.Instance));
 
     public SandboxGitOperationsTests()
     {
@@ -139,6 +143,44 @@ public sealed class SandboxGitOperationsTests
         await act.Should().ThrowAsync<InvalidOperationException>()
             .Where(e => e.Message.Contains("nothing to commit"));
     }
+
+    // p0394: the staged-commit primitive owns the identity guarantee — the
+    // spec-set writer commits in a fresh checkout sandbox before any
+    // identity-configuring staging method has run, which failed live with
+    // "Author identity unknown" (exit 128).
+    [Fact]
+    public async Task CommitAndPushStaged_ConfiguresIdentityBeforeCommit()
+    {
+        await _sut.CommitAndPushStagedAsync(
+            _sandboxMock.Object, "feat/branch", "msg", RepoType.GitHub, CancellationToken.None);
+
+        var commands = Commands();
+        var email = commands.FindIndex(c => c.Contains("config user.email"));
+        var name = commands.FindIndex(c => c.Contains("config user.name"));
+        var commit = commands.FindIndex(c => c.Contains("commit -m msg"));
+        email.Should().BeGreaterThan(-1);
+        name.Should().BeGreaterThan(-1);
+        commit.Should().BeGreaterThan(email).And.BeGreaterThan(name);
+    }
+
+    // p0394: `git config` is idempotent — a flow that already configured the
+    // identity (StageAll before the staged commit) just re-sets the same values.
+    [Fact]
+    public async Task CommitAndPushStaged_IdentityAlreadySet_IdempotentNoFailure()
+    {
+        await _sut.StageAllAsync(_sandboxMock.Object, CancellationToken.None);
+        await _sut.CommitAndPushStagedAsync(
+            _sandboxMock.Object, "feat/branch", "msg", RepoType.GitHub, CancellationToken.None);
+
+        var commands = Commands();
+        commands.Count(c => c.Contains("config user.email")).Should().Be(2);
+        commands.Should().Contain(c => c.Contains("commit -m msg"));
+        commands.Should().Contain(c => c.Contains("push") && c.Contains("HEAD:feat/branch"));
+    }
+
+    private List<string> Commands() => _steps
+        .Select(s => string.Join(' ', new[] { s.Command }.Concat(s.Args ?? Array.Empty<string>())))
+        .ToList();
 
     [Fact]
     public async Task CommitAndPushAsync_PushFails_ThrowsWithUnderlyingError()

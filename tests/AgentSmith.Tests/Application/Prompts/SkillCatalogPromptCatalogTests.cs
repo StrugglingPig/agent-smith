@@ -34,31 +34,48 @@ public sealed class SkillCatalogPromptCatalogTests
     }
 
     [Fact]
-    public void Get_AgentPlanSystem_StaysOnEmbeddedUntilSliceC()
+    public void EmbeddedOwnedPrompt_IgnoresACatalogMasterOfTheSameName()
     {
-        // p0179a: only agent-execute-system routes to coding-agent-master.
-        // agent-plan-system remains embedded until p0179c collapses Plan +
-        // Execute + Verify into one unified body — combining a JSON-returning
-        // plan prompt with a multi-turn execute prompt would confuse the LLM.
+        // p0415: an embedded-owned name wins over a catalog master of the SAME name.
+        // Before the ownership table the direct-name match served the catalog copy,
+        // dropping rules the parser and the keystone depend on.
+        // p0442: the example moved. spec-derivation-master WAS the embedded-owned name;
+        // v4.5.0 carries the rules that held it back, so ownership moved to the catalog
+        // and the remaining embedded-owned name stands for the rule instead.
         var sut = Build(
-            skills: [Master("coding-agent-master", "MASTER_BODY")],
-            embeddedFallback: new Dictionary<string, string> { ["agent-plan-system"] = "EMBEDDED_PLAN" });
+            skills: [Master("expectation-drafting-system", "CATALOG_COPY")],
+            embeddedFallback: new Dictionary<string, string>
+            {
+                ["expectation-drafting-system"] = "EMBEDDED_COPY",
+            });
 
-        sut.Get("agent-plan-system").Should().Be("EMBEDDED_PLAN");
+        sut.Get("expectation-drafting-system").Should().Be("EMBEDDED_COPY");
     }
 
     [Fact]
-    public void Get_UnknownName_FallsBackToEmbedded()
+    public void Get_UndeclaredName_FallsBackToEmbedded()
     {
         var sut = Build(
             skills: [],
-            embeddedFallback: new Dictionary<string, string> { ["triage-system"] = "TRIAGE_PROMPT" });
+            embeddedFallback: new Dictionary<string, string> { ["undeclared-prompt"] = "EMBEDDED" });
 
-        sut.Get("triage-system").Should().Be("TRIAGE_PROMPT");
+        sut.Get("undeclared-prompt").Should().Be("EMBEDDED");
     }
 
     [Fact]
-    public void Get_NameMappedButMasterNotInCatalog_ThrowsLoud()
+    public void Get_UndeclaredName_PrefersAMasterOfThatNameWhenTheCatalogHasOne()
+    {
+        // p0179b/d: a handler-passed master-skill name (security-master,
+        // pr-review-master, ...) is not in the table and resolves directly.
+        var sut = Build(
+            skills: [Master("security-master", "SECURITY_BODY")],
+            embeddedFallback: new Dictionary<string, string>());
+
+        sut.Get("security-master").Should().Be("SECURITY_BODY");
+    }
+
+    [Fact]
+    public void CatalogOwnedPrompt_FailsLoudWhenTheCatalogLacksTheMaster()
     {
         // p0205: a migrated prompt whose master is absent from the catalog must
         // FAIL LOUD — no silent embedded fallback that masks version drift.
@@ -139,13 +156,13 @@ public sealed class SkillCatalogPromptCatalogTests
     {
         var sut = Build(
             skills: [],
-            embeddedFallback: new Dictionary<string, string> { ["triage-system"] = "Hello {Name}" });
+            embeddedFallback: new Dictionary<string, string> { ["undeclared-prompt"] = "Hello {Name}" });
 
         var rendered = sut.Render(
-            "triage-system",
-            new Dictionary<string, string> { ["Name"] = "Triage" });
+            "undeclared-prompt",
+            new Dictionary<string, string> { ["Name"] = "Undeclared" });
 
-        rendered.Should().Be("Hello Triage");
+        rendered.Should().Be("Hello Undeclared");
     }
 
     [Fact]

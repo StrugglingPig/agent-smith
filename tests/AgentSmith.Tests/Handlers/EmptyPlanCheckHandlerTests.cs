@@ -25,6 +25,7 @@ public sealed class EmptyPlanCheckHandlerTests
 
     private readonly EmptyPlanCheckHandler _handler = new(
         EventTestStubs.NoOp,
+        new AgentSmithMetrics(),
         NullLogger<EmptyPlanCheckHandler>.Instance);
 
     [Fact]
@@ -85,7 +86,7 @@ public sealed class EmptyPlanCheckHandlerTests
         pipeline.Set(ContextKeys.ResolvedPipeline, new ResolvedPipelineConfig(
             PipelineName: "fix-bug",
             Agent: new AgentConfig { Type = "claude", Model = "test" },
-            SkillsPath: "skills/coding",
+            SkillsPath: "skills",
             CodingPrinciplesPath: null));
         pipeline.Set(ContextKeys.Ticket, new Ticket(
             new TicketId("T-1"),

@@ -8,13 +8,18 @@ using AgentSmith.Domain.Entities;
 namespace AgentSmith.Application.Services;
 
 /// <summary>
-/// p0315d: renders the phase-execution user prompt for the coding master.
-/// The validated spec travels verbatim inside the untrusted-ticket delimiters
-/// (it came from a ticket body — p0316 rule); the spec-first contract — the
-/// spec's steps are the approved plan, decisions get logged, tests run, every
-/// done criterion is verified before the verdict — is framework text OUTSIDE
-/// the markers. Operator answers from a prior clarification park (PlanAnswers,
-/// re-triggered run) are rendered authoritative.
+/// p0315d, p0393a: renders the phase user prompt for the coding master — the prompt of
+/// every code run, because every code run now carries a derived phase spec.
+/// <para>
+/// The validated spec travels verbatim inside the untrusted-ticket delimiters (it came
+/// from a ticket body — p0316 rule); the contract around it — decisions get logged,
+/// tests run, every done criterion is verified before the verdict — is framework text
+/// OUTSIDE the markers. p0394a: the spec IS the plan of record. Its steps seed the
+/// progress ledger the master opens on; the phase's markdown companion carries the
+/// ticket's own naming rules and templates byte-identical.
+/// </para>
+/// Operator answers from a prior clarification park (PlanAnswers, re-triggered run) are
+/// rendered authoritative.
 /// </summary>
 public sealed class PhaseExecutionPromptFactory : IPhaseExecutionPromptFactory
 {
@@ -51,13 +56,16 @@ public sealed class PhaseExecutionPromptFactory : IPhaseExecutionPromptFactory
             **Path:** {repository.LocalPath}
             **Branch:** {repository.CurrentBranch}
             **Sandbox keys:** {string.Join(", ", sandboxKeys)}
+            {PhaseExecutionPromptBlocks.StagedRegistries(pipeline)}
+            {PhaseExecutionPromptBlocks.OutstandingCriteria(pipeline)}
 
-            ## Phase execution contract
-            This ticket is a PHASE SPEC ({draft.PhaseId}). The spec's ordered steps are the
-            approved plan rendered above — implement each step in order and log every
-            non-obvious choice via log_decision as you go. Where the spec names tests,
-            write them; run the repository's build and automated tests as usual.
-            {BuildDoneCriteriaSection(draft)}
+            ## Phase contract
+            You are implementing PHASE {draft.PhaseId} — this phase and nothing after it.
+            The spec above is the plan of record: its steps are your checklist (the progress
+            ledger is seeded from them) and you own how each step lands in this codebase.
+            Log every non-obvious choice via log_decision as you go. Where the spec names
+            tests, write them; run the repository's build and automated tests as usual.
+            {PhaseExecutionPromptBlocks.DoneCriteria(draft)}
             Before you emit your verdict, verify EACH done criterion above out loud —
             a criterion you cannot satisfy makes the run red, not silently smaller.
             When you are genuinely blocked on missing input, call ask_human once: the
@@ -66,15 +74,4 @@ public sealed class PhaseExecutionPromptFactory : IPhaseExecutionPromptFactory
             """;
     }
 
-    private static string BuildDoneCriteriaSection(PhaseDraft draft)
-    {
-        var map = OutcomeYamlReader.ReadMap(draft.Yaml);
-        var done = (OutcomeYamlReader.GetList(map, "done") ?? [])
-            .Select(d => d?.ToString())
-            .Where(d => !string.IsNullOrWhiteSpace(d))
-            .ToList();
-        if (done.Count == 0) return string.Empty;
-        var bullets = string.Join("\n", done.Select(d => $"- {d}"));
-        return $"\n### Done criteria\n{bullets}\n";
-    }
 }

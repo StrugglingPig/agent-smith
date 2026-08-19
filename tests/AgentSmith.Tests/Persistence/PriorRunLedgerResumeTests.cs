@@ -1,3 +1,4 @@
+using AgentSmith.Tests.TestSupport;
 using System;
 using System.Collections.Generic;
 using AgentSmith.Application.Services.Tools;
@@ -26,10 +27,7 @@ public sealed class PriorRunLedgerResumeTests : IDisposable
 
     public PriorRunLedgerResumeTests()
     {
-        _connection = new SqliteConnection("Data Source=:memory:");
-        _connection.Open();
-        using var ctx = new AgentSmithDbContext(Options());
-        ctx.Database.Migrate();
+        _connection = MigratedStoreTemplate.OpenCopy();
     }
 
     public void Dispose() => _connection.Dispose();
@@ -41,6 +39,13 @@ public sealed class PriorRunLedgerResumeTests : IDisposable
     {
         var services = new ServiceCollection();
         services.AddScoped<IUnitOfWork>(_ => new AgentSmithDbContext(Options()));
+        services.AddSingleton<AgentSmith.Infrastructure.Persistence.Services.RunCheckpointProjection>();
+        services.AddSingleton<AgentSmith.Infrastructure.Persistence.Services.RunExpectationProjection>();
+        services.AddSingleton<AgentSmith.Infrastructure.Persistence.Services.QueuedRunProjection>();
+        services.AddSingleton<AgentSmith.Infrastructure.Persistence.Services.RunSandboxProjection>();
+        services.AddSingleton<AgentSmith.Infrastructure.Persistence.Services.RunStepTimeProjection>();
+        services.AddSingleton<AgentSmith.Infrastructure.Persistence.Services.RunPullRequestProjection>();
+        services.AddSingleton<AgentSmith.Infrastructure.Persistence.Services.RunClassificationProjection>();
         services.AddSingleton<RunEventApplier>();
         services.AddSingleton<DbPriorRunLedgerReader>();
         return services.BuildServiceProvider();

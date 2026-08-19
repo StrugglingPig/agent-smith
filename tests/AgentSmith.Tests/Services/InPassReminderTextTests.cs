@@ -12,7 +12,7 @@ public sealed class InPassReminderTextTests
     [Fact]
     public void Reminder_EmptyLedger_NudgesSeedingAndIsIgnorable()
     {
-        var text = AgenticMasterHandler.BuildInPassReminder(new ProgressLedger([]));
+        var text = MasterNudges.BuildInPassReminder(new ProgressLedger([]));
 
         text.Should().Contain("<system-reminder>").And.Contain("</system-reminder>");
         text.Should().Contain("seed the checklist");
@@ -22,19 +22,25 @@ public sealed class InPassReminderTextTests
     [Fact]
     public void Reminder_DrainedLedger_PointsAtVerdictOrRestructure()
     {
-        var text = AgenticMasterHandler.BuildInPassReminder(new ProgressLedger(
+        var text = MasterNudges.BuildInPassReminder(new ProgressLedger(
         [
             new ProgressLedgerEntry("1", "a", ProgressStatus.Done),
         ]));
 
         text.Should().Contain("emit your verdict");
-        text.Should().Contain("add those steps");
+        // p0391: the invitation to add steps is QUALIFIED. Unqualified it sat next to a
+        // mechanism that turns any added item into another loop pass, so a model appending
+        // "verify X once more" re-drove itself until the money or the operator stopped it.
+        text.Should().Contain("Add a step only for");
+        text.Should().Contain("work you have NOT done yet");
+        text.Should().Contain("re-read or re-confirm evidence you already recorded");
+        text.Should().Contain("you are done");
     }
 
     [Fact]
     public void Reminder_StaleLedger_AllowsRestructureAndCarriesCurrentState()
     {
-        var text = AgenticMasterHandler.BuildInPassReminder(new ProgressLedger(
+        var text = MasterNudges.BuildInPassReminder(new ProgressLedger(
         [
             new ProgressLedgerEntry("1", "inventory", ProgressStatus.Done),
             new ProgressLedgerEntry("2", "migrate handlers", ProgressStatus.InProgress),

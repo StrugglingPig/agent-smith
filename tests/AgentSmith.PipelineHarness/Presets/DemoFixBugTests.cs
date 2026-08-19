@@ -39,18 +39,24 @@ public sealed class DemoFixBugTests : IAsyncLifetime
         await using var harness = RealCompositionHarness.Build(
             FixturePaths.For(FixturePaths.Default), HarnessProjectAnalyzerStub.Register);
         harness.ChatClient
-            // p0328: NegotiateExpectation drafts before GeneratePlan and drains one
-            // FIFO slot; headless demo runs auto-ratify the draft as 'unratified'.
+            // p0393a: DeriveSpec turns the ticket into the phase set and drains one FIFO
+            // slot. The phase's done-list is the run's acceptance contract — p0328's
+            // negotiation left the code pipeline with it.
             .EnqueueText("""
-                {"observed": "Bulk discount is not applied at exactly 100.00.",
-                 "expected": ["Order totals of exactly 100.00 receive the bulk discount.", "Totals below 100.00 stay undiscounted."],
-                 "constraints": ["No behavior change for totals above 100.00."],
-                 "open_question": null}
+                {"phases": [
+                   {"slug": "bulk-discount-boundary",
+                    "goal": "Apply the bulk discount at exactly 100.00",
+                    "steps": [{"id": "boundary", "action": "Include the 100.00 boundary in the discount check"}],
+                    "done": ["Order totals of exactly 100.00 receive the bulk discount.",
+                             "Totals below 100.00 stay undiscounted."],
+                    "carries": [1,2,3,4,5,6,7,8]}],
+                 "discarded": [], "ignored_instructions": [],
+                 "handback": {"case": "none", "reason": ""}}
                 """)
-            // GeneratePlan drains one FIFO slot before the master (p0276).
-            .EnqueueText("Planning: fix the boundary comparison in PriceCalculator.")
+            // p0394a: no plan slot — the spec is the plan, the master consumes next.
             .EnqueueToolCall("write_file", """{"path":"primary/src/Sample/PriceCalculator.cs","content":"// >= boundary fix"}""")
             .EnqueueToolCall("run_command", """{"command":"dotnet test tests/Sample.Tests/Sample.Tests.csproj","repo":"primary"}""")
+            .EnqueueToolCall("update_progress", """{"items":[{"id":"boundary","activity":"Include the 100.00 boundary in the discount check","status":"done"}]}""")
             .EnqueueText("""Done. {"status":"green","build_ran":true,"build_passed":true,"tests_ran":true,"tests_passed":true,"summary":"boundary fixed","acceptance":[{"criterion":"criterion 1","status":"met","evidence":"handled in the change"},{"criterion":"criterion 2","status":"met","evidence":"existing behaviour preserved"}]}""");
 
         var runner = new PipelineRunner(harness.Services)
@@ -68,7 +74,7 @@ public sealed class DemoFixBugTests : IAsyncLifetime
         var ticket = runner.LastContext!.Get<Ticket>(ContextKeys.Ticket);
         ticket.Source.Should().Be(InlineTicket.Source, "the run's requirement record is the inline payload");
         ticket.Title.Should().Contain("Bulk discount");
-        harness.ChatClient.ToolCalls.ShouldHaveCalledInOrder("write_file", "run_command");
+        harness.ChatClient.ToolCalls.ShouldHaveCalledInOrder("write_file", "run_command", "update_progress");
     }
 
     public Task InitializeAsync() => Task.CompletedTask;

@@ -3,6 +3,7 @@ using AgentSmith.Contracts.Models.Configuration;
 using AgentSmith.Contracts.Persistence;
 using AgentSmith.Contracts.Sandbox;
 using AgentSmith.Contracts.Services;
+using AgentSmith.Contracts.Specs;
 using AgentSmith.Application.Services.Lifecycle;
 using AgentSmith.Infrastructure.Core.Services.Configuration;
 using AgentSmith.Infrastructure.Core.Services.Configuration.Studio;
@@ -119,6 +120,13 @@ internal static class RelationalPersistenceExtensions
         // the transport decorator writes answers durable-first; the resume
         // sweeper (housekeeping leader) turns answered/expired checkpoints into
         // capacity-queue resume entries the pump launches.
+        // p0393a: the work-spec pointer — carrying repo + last revision sha + hand-back
+        // counters. Replaces the DB-free in-memory default so a re-trigger in another
+        // process can still tell its own last revision from a reviewer's edit.
+        services.AddScoped<TicketSpecSetRepository>();
+        services.RemoveAll<ISpecSetPointerStore>();
+        services.AddSingleton<ISpecSetPointerStore, DbSpecSetPointerStore>();
+        services.AddScoped<Services.Lifecycle.NotImplementableRetryService>();
         services.AddScoped<RunCheckpointRepository>();
         services.AddScoped<DialogueAnswerRepository>();
         services.RemoveAll<IRunCheckpointStore>();
@@ -137,8 +145,11 @@ internal static class RelationalPersistenceExtensions
 
         // p0246c: the server-side event projector + read store + retention. The
         // projector is resolved optionally by CompositeRunEventFanout (Program.cs).
+        // p0403: the applier's projections are services it owns, not statics it calls.
+        services.AddRunProjections();
         services.AddSingleton<RunEventApplier>();
         services.AddSingleton<RunDbProjector>();
+        services.AddRunTracing();
         // p0378: cold-start terminal repair — a RunFinished sitting in the stream
         // beyond the tail-anchored drain cursor is persisted from the stream itself.
         services.AddSingleton<IRunTerminalReconciler, RunTerminalReconciler>();
@@ -152,11 +163,6 @@ internal static class RelationalPersistenceExtensions
         // p0329: ratification outcomes → expectation-metrics read surface.
         services.AddScoped<ExpectationMetricsRepository>();
         services.AddScoped<RunRetentionService>();
-
-        // p0262: the ticket-lifecycle status is no longer stored or read as authority —
-        // it is DERIVED from the native ticket status + the ActiveRun lease. The
-        // p0246d DB-authoritative transitioner decorator is gone; transitions write the
-        // platform label directly as a pure marker (unconditional, no DB).
 
         // p0246e: mirror the durable markdown slots into the DB so result.md /
         // plan.md survive a process restart AND a Redis flush.

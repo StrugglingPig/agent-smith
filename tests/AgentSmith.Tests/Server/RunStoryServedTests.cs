@@ -1,3 +1,4 @@
+using AgentSmith.Tests.TestSupport;
 using System.Text.Json;
 using AgentSmith.Application.Services;
 using AgentSmith.Contracts.Commands;
@@ -31,10 +32,7 @@ public sealed class RunStoryServedTests : IDisposable
 
     public RunStoryServedTests()
     {
-        _connection = new SqliteConnection("Data Source=:memory:");
-        _connection.Open();
-        using var ctx = new AgentSmithDbContext(Options());
-        ctx.Database.Migrate();
+        _connection = MigratedStoreTemplate.OpenCopy();
     }
 
     public void Dispose() => _connection.Dispose();
@@ -174,8 +172,8 @@ public sealed class RunStoryServedTests : IDisposable
     public void RunStoryRecordedEvent_RoundTripsThroughTheEnvelopeSerializer()
     {
         var ev = new RunStoryRecordedEvent("r1", "[{\"id\":\"1\"}]", null, T);
-        var envelope = EventEnvelopeSerializer.Serialize(ev);
-        var back = EventEnvelopeSerializer.Deserialize(envelope);
+        var envelope = new AgentSmith.Infrastructure.Services.Events.EventEnvelopeSerializer().Serialize(ev);
+        var back = new AgentSmith.Infrastructure.Services.Events.EventEnvelopeSerializer().Deserialize(envelope);
 
         back.Should().BeOfType<RunStoryRecordedEvent>()
             .Which.ProgressLedgerJson.Should().Be("[{\"id\":\"1\"}]");
@@ -183,7 +181,7 @@ public sealed class RunStoryServedTests : IDisposable
 
     private async Task ApplyAsync(params RunEvent[] events)
     {
-        var applier = new RunEventApplier();
+        var applier = new RunEventApplier(new(), new(), new(), new(), new(), new(), new());
         foreach (var ev in events)
         {
             await using var uow = new AgentSmithDbContext(Options());
